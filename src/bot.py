@@ -12,6 +12,7 @@ from src import log, art, personas, responses
 def run_discord_bot():
     @client.event
     async def on_ready():
+        client.is_replying_all = "True"
         await client.send_start_prompt()
         await client.tree.sync()
         loop = asyncio.get_event_loop()
@@ -328,9 +329,15 @@ gpt-engine: {chat_engine_status}
                     username = str(message.author)
                     user_message = str(message.content)
                     client.current_channel = message.channel
-                    logger.info(f"\x1b[31m{username}\x1b[0m : '{user_message}' ({client.current_channel})")
-
-                    await client.enqueue_message(message, user_message)
+                    regex = os.getenv("MESSAGE_REGEX")
+                    try:
+                        if re.match(regex, user_message.lower()):
+                            logger.info(f"\x1b[31m{username}\x1b[0m : '{user_message}' ({client.current_channel})")
+                            await client.enqueue_message(message, user_message)
+                        else:
+                            logger.info(f'did not see my name in: {user_message}')
+                    except re.error:
+                        logger.error(f"Invalid regex: {regex}")
             else:
                 logger.exception("replying_all_discord_channel_id not found, please use the command `/replyall` again.")
 
