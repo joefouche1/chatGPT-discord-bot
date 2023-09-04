@@ -12,7 +12,7 @@ from src import log, art, personas, responses
 def run_discord_bot():
     @client.event
     async def on_ready():
-        client.is_replying_all = "True"
+        client.is_replying_all = os.getenv("REPLYING_ALL", "False")
         await client.send_start_prompt()
         await client.tree.sync()
         loop = asyncio.get_event_loop()
