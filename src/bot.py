@@ -1,4 +1,5 @@
 import os
+import re
 import openai
 import asyncio
 import discord
