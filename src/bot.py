@@ -327,10 +327,10 @@ gpt-engine: {chat_engine_status}
                             logger.info(f'did not see my name or a mention in: {user_message}')
                     except re.error:
                         logger.error(f"Invalid regex: {regex}")
-            elif isinstance(message.channel, discord.DMChannel):
-                logger.info(f"\x1b[31m{username}\x1b[0m : '{user_message}' (DM)")
-                client.current_channel = discord.DMChannel
-                await client.enqueue_message(message, user_message)
+            # elif isinstance(message.channel, discord.DMChannel):
+            #     logger.info(f"\x1b[31m{username}\x1b[0m : '{user_message}' (DM)")
+            #     client.current_channel = discord.DMChannel
+            #     await client.enqueue_message(message, user_message)
             else:
                 logger.exception("replying_all_discord_channel_id not found, please use the command `/replyall` again.")
 
