@@ -7,8 +7,7 @@ from src.log import logger
 from random import randrange
 from src.aclient import client
 from discord import app_commands
-from src import log, art, personas, responses
-
+from src import art, personas, responses
 
 def run_discord_bot():
     @client.event
@@ -19,7 +18,6 @@ def run_discord_bot():
         loop = asyncio.get_event_loop()
         loop.create_task(client.process_messages())
         logger.info(f'{client.user} is now running!')
-
 
     @client.tree.command(name="chat", description="Have a chat with ChatGPT")
     async def chat(interaction: discord.Interaction, *, message: str):
@@ -38,7 +36,6 @@ def run_discord_bot():
 
         await client.enqueue_message(interaction, message)
 
-
     @client.tree.command(name="private", description="Toggle private access")
     async def private(interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=False)
@@ -52,7 +49,6 @@ def run_discord_bot():
             await interaction.followup.send(
                 "> **WARN: You already on private mode. If you want to switch to public mode, use `/public`**")
 
-
     @client.tree.command(name="public", description="Toggle public access")
     async def public(interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=False)
@@ -65,7 +61,6 @@ def run_discord_bot():
             await interaction.followup.send(
                 "> **WARN: You already on public mode. If you want to switch to private mode, use `/private`**")
             logger.info("You already on public mode!")
-
 
     @client.tree.command(name="replyall", description="Toggle replyAll access")
     async def replyall(interaction: discord.Interaction):
@@ -81,7 +76,6 @@ def run_discord_bot():
             await interaction.followup.send(
                 "> **INFO: Next, the bot will disable Slash Command and responding to all message in this channel only. If you want to switch back to normal mode, use `/replyAll` again**")
             logger.warning("\x1b[31mSwitch to replyAll mode\x1b[0m")
-
 
     @client.tree.command(name="chat-model", description="Switch different chat model")
     @app_commands.choices(choices=[
@@ -129,7 +123,6 @@ def run_discord_bot():
             await interaction.followup.send(f"> **ERROR: Error while switching to the {choices.value} model, check that you've filled in the related fields in `.env`.**\n")
             logger.exception(f"Error while switching to the {choices.value} model: {e}")
 
-
     @client.tree.command(name="reset", description="Complete reset conversation history")
     async def reset(interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=False)
@@ -147,7 +140,6 @@ def run_discord_bot():
         personas.current_persona = "standard"
         logger.warning(
             f"\x1b[31m{client.chat_model} bot has been successfully reset\x1b[0m")
-
 
     @client.tree.command(name="help", description="Show help for the bot")
     async def help(interaction: discord.Interaction):
@@ -181,7 +173,6 @@ https://github.com/Zero6992/chatGPT-discord-bot""")
         logger.info(
             "\x1b[31mSomeone needs help!\x1b[0m")
 
-
     @client.tree.command(name="info", description="Bot information")
     async def info(interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=False)
@@ -202,7 +193,6 @@ chat-model: {chat_model_status}
 gpt-engine: {chat_engine_status}
 ```
 """)
-
 
     @client.tree.command(name="draw", description="Generate an image with the Dalle2 model")
     @app_commands.choices(amount=[
@@ -246,7 +236,6 @@ gpt-engine: {chat_engine_status}
             await interaction.followup.send(
                 "> **ERROR: Something went wrong 😿**")
             logger.exception(f"Error while generating image: {e}")
-
 
     @client.tree.command(name="switchpersona", description="Switch between optional chatGPT jailbreaks")
     @app_commands.choices(persona=[
@@ -301,7 +290,6 @@ gpt-engine: {chat_engine_status}
             await interaction.followup.send(
                 f"> **INFO: Switched to `{chosen_persona}` persona**")
 
-
         elif persona in personas.PERSONAS:
             try:
                 await responses.switch_persona(persona, client)
@@ -319,16 +307,16 @@ gpt-engine: {chat_engine_status}
             logger.info(
                 f'{username} requested an unavailable persona: `{persona}`')
 
-
     @client.event
     async def on_message(message):
         if client.is_replying_all == "True":
+            username = str(message.author)
+            user_message = str(message.content)
             if message.author == client.user:
                 return
             if client.replying_all_discord_channel_id:
                 if message.channel.id == int(client.replying_all_discord_channel_id):
-                    username = str(message.author)
-                    user_message = str(message.content)
+
                     client.current_channel = message.channel
                     regex = os.getenv("MESSAGE_REGEX")
                     try:
@@ -336,9 +324,13 @@ gpt-engine: {chat_engine_status}
                             logger.info(f"\x1b[31m{username}\x1b[0m : '{user_message}' ({client.current_channel})")
                             await client.enqueue_message(message, user_message)
                         else:
-                            logger.info(f'did not see my name in: {user_message}')
+                            logger.info(f'did not see my name or a mention in: {user_message}')
                     except re.error:
                         logger.error(f"Invalid regex: {regex}")
+            elif isinstance(message.channel, discord.DMChannel):
+                logger.info(f"\x1b[31m{username}\x1b[0m : '{user_message}' (DM)")
+                client.current_channel = discord.DMChannel
+                await client.enqueue_message(message, user_message)
             else:
                 logger.exception("replying_all_discord_channel_id not found, please use the command `/replyall` again.")
 

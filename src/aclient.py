@@ -19,6 +19,7 @@ from EdgeGPT.EdgeGPT import Chatbot as EdgeChatbot
 
 load_dotenv()
 
+
 class aclient(discord.Client):
     def __init__(self) -> None:
         intents = discord.Intents.default()
@@ -65,10 +66,10 @@ class aclient(discord.Client):
         self.chatbot = self.get_chatbot_model()
         self.message_queue = asyncio.Queue()
 
-    def get_chatbot_model(self, prompt = None) -> Union[AsyncChatbot, Chatbot]:
+    def get_chatbot_model(self, prompt=None) -> Union[AsyncChatbot, Chatbot]:
         if not prompt:
             prompt = self.starting_prompt
-        if self.chat_model == "UNOFFICIAL":
+        if self.chat_model=="UNOFFICIAL":
             return AsyncChatbot(config = {
                 "access_token": self.chatgpt_access_token,
                 "model": "text-davinci-002-render-sha" if self.openAI_gpt_engine == "gpt-3.5-turbo" else self.openAI_gpt_engine,
@@ -86,16 +87,15 @@ class aclient(discord.Client):
         while True:
             if self.current_channel is not None:
                 while not self.message_queue.empty():
-                    async with self.current_channel.typing():
-                        message, user_message = await self.message_queue.get()
-                        try:
-                            await self.send_message(message, user_message)
-                        except Exception as e:
-                            logger.exception(f"Error while processing message: {e}")
-                        finally:
-                            self.message_queue.task_done()
+                    await self.current_channel.typing()
+                    message, user_message = await self.message_queue.get()
+                    try:
+                        await self.send_message(message, user_message)
+                    except Exception as e:
+                        logger.exception(f"Error while processing message: {e}")
+                    finally:
+                        self.message_queue.task_done()
             await asyncio.sleep(1)
-
 
     async def enqueue_message(self, message, user_message):
         await message.response.defer(ephemeral=self.isPrivate) if self.is_replying_all == "False" else None
@@ -158,6 +158,5 @@ class aclient(discord.Client):
                 logger.info(f"Not given starting prompt. Skiping...")
         except Exception as e:
             logger.exception(f"Error while sending system prompt: {e}")
-
 
 client = aclient()
