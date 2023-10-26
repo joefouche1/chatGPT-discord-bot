@@ -1,4 +1,3 @@
-import sys
 import pkg_resources
 
 from src import bot
@@ -23,8 +22,8 @@ def check_version() -> None:
         name, version = installed.project_name, installed.version
         # Compare the version number to see if it matches the one in requirements.txt
         if package != f'{name}=={version}':
-            logger.error(f'{name} version {version} is installed but does not match the requirements')
-            sys.exit()
+            logger.warning(f'{name} version {version} is installed but does not match the requirements')
+
 
 if __name__ == '__main__':
     check_version()
