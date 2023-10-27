@@ -137,9 +137,9 @@ gpt-engine: {chat_engine_status}
                             await client.enqueue_message(message, user_message)
 
                             if random.random() < 0.25:
-                                if writer.contains("Howler"):
+                                if "Howler" in writer:
                                     await message.add_reaction("🐷")
-                                elif writer.contains("Joe"):
+                                elif "Joe" in writer:
                                     await message.add_reaction("🧠")
                     except re.error:
                         logger.error(f"Invalid regex: {regex}")
