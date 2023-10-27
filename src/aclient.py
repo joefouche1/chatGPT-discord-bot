@@ -79,6 +79,8 @@ class aclient(discord.Client):
         try:
             response = (f'> **{user_message}** - <@{str(author)}> \n\n')
             response = f"{response}{await self.handle_response(user_message)}"
+            
+            logger.info(f"Model output [{len(response)}]: {response[:200]}...")
             await send_split_message(self, response, message)
         except Exception as e:
             logger.exception(f"Error while sending : {e}")
