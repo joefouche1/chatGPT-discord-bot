@@ -127,8 +127,8 @@ gpt-engine: {chat_engine_status}
                 regex = os.getenv("MESSAGE_REGEX")
                 try:
                     if re.match(regex, user_message.lower()) or client.user.mentioned_in(message):
-                        # logger.info(
-                        #     f"\x1b[31m{username}\x1b[0m : '{user_message}' ({client.current_channel})")
+                        logger.info(
+                             f"\x1b[31m{username}\x1b[0m : '{user_message}' ({client.current_channel})")
                         await client.enqueue_message(message, user_message)
 
                         # if random.random() < 0.25:
