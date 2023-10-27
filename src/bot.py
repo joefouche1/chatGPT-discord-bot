@@ -121,28 +121,23 @@ gpt-engine: {chat_engine_status}
     @client.event
     async def on_message(message):
         if client.is_replying_all == "True":
-            # username = str(message.author)
-            # writer = str(message.author.name)
-            user_message = str(message.content)
-            if message.author == client.user:
-                return
-            if client.replying_all_discord_channel_id:
-                if message.channel.id == int(client.replying_all_discord_channel_id):
-                    client.current_channel = message.channel
-                    regex = os.getenv("MESSAGE_REGEX")
-                    try:
-                        if re.match(regex, user_message.lower()) or client.user.mentioned_in(message):
-                            # logger.info(
-                            #     f"\x1b[31m{username}\x1b[0m : '{user_message}' ({client.current_channel})")
-                            await client.enqueue_message(message, user_message)
+            if (message.author != client.user) and (message.channel.id in client.replying_all_discord_channel_ids):
+                user_message = str(message.content)
+                client.current_channel = message.channel
+                regex = os.getenv("MESSAGE_REGEX")
+                try:
+                    if re.match(regex, user_message.lower()) or client.user.mentioned_in(message):
+                        # logger.info(
+                        #     f"\x1b[31m{username}\x1b[0m : '{user_message}' ({client.current_channel})")
+                        await client.enqueue_message(message, user_message)
 
-                            # if random.random() < 0.25:
-                            #     if "Howler" in writer:
-                            #         await message.add_reaction("🐷")
-                            #     elif "Joe" in writer:
-                            #         await message.add_reaction("🧠")
-                    except re.error:
-                        logger.error(f"Invalid regex: {regex}")
+                        # if random.random() < 0.25:
+                        #     if "Howler" in writer:
+                        #         await message.add_reaction("🐷")
+                        #     elif "Joe" in writer:
+                        #         await message.add_reaction("🧠")
+                except re.error:
+                    logger.error(f"Invalid regex: {regex}")
             # elif isinstance(message.channel, discord.DMChannel):
             #     logger.info(f"\x1b[31m{username}\x1b[0m : '{user_message}' (DM)")
             #     response = client.handle_response(user_message)
