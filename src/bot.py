@@ -21,7 +21,8 @@ def run_discord_bot():
         await client.tree.sync()
         loop = asyncio.get_event_loop()
         loop.create_task(client.process_messages())
-        logger.info(f'{client.user} is now running!')
+        logger.info(
+            f'{client.user} is now running! listening on {client.replying_all_discord_channel_ids}')
 
     @client.tree.command(name="chat", description="Have a chat with ChatGPT")
     async def chat(interaction: discord.Interaction, *, message: str):
@@ -120,31 +121,41 @@ gpt-engine: {chat_engine_status}
 
     @client.event
     async def on_message(message):
-        if client.is_replying_all == "True":
-            if (message.author != client.user) and (message.channel.id in client.replying_all_discord_channel_ids):
-                user_message = str(message.content)
-                client.current_channel = message.channel
-                regex = os.getenv("MESSAGE_REGEX")
-                try:
-                    if re.match(regex, user_message.lower()) or client.user.mentioned_in(message):
-                        logger.info(
-                             f"\x1b[31m{username}\x1b[0m : '{user_message}' ({client.current_channel})")
-                        await client.enqueue_message(message, user_message)
+        in_channels = (message.channel.id in client.replying_all_discord_channel_ids)
+        is_dm = isinstance(message.channel, discord.DMChannel)
 
-                        # if random.random() < 0.25:
-                        #     if "Howler" in writer:
-                        #         await message.add_reaction("🐷")
-                        #     elif "Joe" in writer:
-                        #         await message.add_reaction("🧠")
-                except re.error:
-                    logger.error(f"Invalid regex: {regex}")
-            # elif isinstance(message.channel, discord.DMChannel):
-            #     logger.info(f"\x1b[31m{username}\x1b[0m : '{user_message}' (DM)")
-            #     response = client.handle_response(user_message)
-            #     await message.channel.send(response)
-            # else:
-            #     logger.exception(
-            #         "replying_all_discord_channel_id not found, please use the command `/replyall` again.")
+        username = str(message.author)
+        user_message = str(message.content)
+        writer = str(message.author.name)
+       
+        if (message.author != client.user) and (in_channels or is_dm):
+            client.current_channel = message.channel
+            regex = os.getenv("MESSAGE_REGEX")
+
+
+            try:
+                if re.match(regex, user_message.lower()) or client.user.mentioned_in(message) or is_dm:
+                    # ACTIVATE THE PIG
+                    if ',' in user_message:
+                        user_message = user_message.split(',', 1)[1].strip()
+                    logger.info(
+                        f"\x1b[31m{username}\x1b[0m : '{user_message}' ({client.current_channel})")
+                    await client.enqueue_message(message, user_message)
+
+                    if random.random() < 0.25:
+                        if "Howler" in writer:
+                            await message.add_reaction("🐷")
+                        elif "Joe" in writer:
+                            await message.add_reaction("🧠")
+            except re.error:
+                logger.error(f"Invalid regex: {regex}")
+        #     response = client.handle_response(user_message)
+        #     await message.channel.send(response)
+        # else:
+        #    logger.info(f"ignoring message in {message.channel.id} from {message.author}: set membership {in_channels}")
+        # else:
+        #     logger.exception(
+        #         "replying_all_discord_channel_id not found, please use the command `/replyall` again.")
 
     TOKEN = os.getenv("DISCORD_BOT_TOKEN")
     client.run(TOKEN)

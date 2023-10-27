@@ -27,7 +27,7 @@ class aclient(discord.Client):
         self.isPrivate = False
         self.is_replying_all = os.getenv("REPLYING_ALL")
         
-        self.replying_all_discord_channel_ids = set(os.getenv("REPLYING_ALL_DISCORD_CHANNEL_IDS").split(','))
+        self.replying_all_discord_channel_ids = set(int(id) for id in os.getenv("REPLYING_ALL_DISCORD_CHANNEL_IDS").split(','))
         self.openAI_email = os.getenv("OPENAI_EMAIL")
         self.openAI_password = os.getenv("OPENAI_PASSWORD")
         self.openAI_API_key = os.getenv("OPENAI_API_KEY")
