@@ -59,6 +59,8 @@ class aclient(discord.Client):
                 while not self.message_queue.empty():
                     await self.current_channel.typing()
                     message, user_message = await self.message_queue.get()
+
+                    f"{user_message} ({self.current_channel})"
                     try:
                         await self.send_message(message, user_message)
                     except Exception as e:
@@ -78,9 +80,10 @@ class aclient(discord.Client):
             author = message.author.id
         try:
             response = (f'> **{user_message}** - <@{str(author)}> \n\n')
-            response = f"{response}{await self.handle_response(user_message)}"
+            model_out = await self.handle_response(user_message)
+            response = f"{response}{model_out}"
             
-            logger.info(f"Model output [{len(response)}]: {response[:200]}...")
+            logger.info(f"Model output [{len(model_out)}]: {model_out[:200]}...")
             await send_split_message(self, response, message)
         except Exception as e:
             logger.exception(f"Error while sending : {e}")
