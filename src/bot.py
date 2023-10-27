@@ -143,13 +143,13 @@ gpt-engine: {chat_engine_status}
                                     await message.add_reaction("🧠")
                     except re.error:
                         logger.error(f"Invalid regex: {regex}")
-            elif isinstance(message.channel, discord.DMChannel):
-                logger.info(f"\x1b[31m{username}\x1b[0m : '{user_message}' (DM)")
-                response = client.handle_response(user_message)
-                await message.channel.send(response)
-            else:
-                logger.exception(
-                    "replying_all_discord_channel_id not found, please use the command `/replyall` again.")
+            # elif isinstance(message.channel, discord.DMChannel):
+            #     logger.info(f"\x1b[31m{username}\x1b[0m : '{user_message}' (DM)")
+            #     response = client.handle_response(user_message)
+            #     await message.channel.send(response)
+            # else:
+            #     logger.exception(
+            #         "replying_all_discord_channel_id not found, please use the command `/replyall` again.")
 
     TOKEN = os.getenv("DISCORD_BOT_TOKEN")
     client.run(TOKEN)
