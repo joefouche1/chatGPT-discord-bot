@@ -16,10 +16,6 @@ from asgiref.sync import sync_to_async
 load_dotenv()
 
 
-async def official_handle_response(message, client) -> str:
-    return await sync_to_async(client.chatbot.ask)(message)
-
-
 class aclient(discord.Client):
     def __init__(self) -> None:
         intents = discord.Intents.default()
@@ -48,6 +44,9 @@ class aclient(discord.Client):
         self.chat_model = os.getenv("CHAT_MODEL")
         self.chatbot = self.get_chatbot_model()
         self.message_queue = asyncio.Queue()
+
+    async def handle_response(self, message) -> str:
+        return await sync_to_async(self.chatbot.ask)(message)
 
     def get_chatbot_model(self, prompt=None) -> Chatbot:
         if not prompt:
@@ -79,7 +78,7 @@ class aclient(discord.Client):
             author = message.author.id
         try:
             response = (f'> **{user_message}** - <@{str(author)}> \n\n')
-            response = f"{response}{await official_handle_response(user_message, self)}"
+            response = f"{response}{await self.handle_response(user_message)}"
             await send_split_message(self, response, message)
         except Exception as e:
             logger.exception(f"Error while sending : {e}")
@@ -95,7 +94,7 @@ class aclient(discord.Client):
                 if (discord_channel_id):
                     channel = self.get_channel(int(discord_channel_id))
                     logger.info(f"Send system prompt with size {len(self.starting_prompt)}")
-                    response = f"{await official_handle_response(self.starting_prompt, self)}"
+                    response = f"{await self.handle_response(self.starting_prompt)}"
                     await channel.send(response)
                     logger.info(f"System prompt response:{response}")
                 else:

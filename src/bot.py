@@ -1,6 +1,6 @@
 import os
 import re
-
+import random
 import asyncio
 import discord
 
@@ -29,7 +29,8 @@ def run_discord_bot():
             await interaction.response.defer(ephemeral=False)
             await interaction.followup.send(
                 "> **WARN: You already on replyAll mode. If you want to use the Slash Command, switch to normal mode by using `/replyall` again**")
-            logger.warning("\x1b[31mYou already on replyAll mode, can't use slash command!\x1b[0m")
+            logger.warning(
+                "\x1b[31mYou already on replyAll mode, can't use slash command!\x1b[0m")
             return
         if interaction.user == client.user:
             return
@@ -108,15 +109,7 @@ def run_discord_bot():
     async def info(interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=False)
         chat_engine_status = client.openAI_gpt_engine
-        chat_model_status = client.chat_model
-        if client.chat_model == "UNOFFICIAL":
-            chat_model_status = "ChatGPT(UNOFFICIAL)"
-        elif client.chat_model == "OFFICIAL":
-            chat_model_status = "OpenAI API(OFFICIAL)"
-        if client.chat_model != "UNOFFICIAL" and client.chat_model != "OFFICIAL":
-            chat_engine_status = "x"
-        elif client.openAI_gpt_engine == "text-davinci-002-render-sha":
-            chat_engine_status = "gpt-3.5"
+        chat_model_status = "OpenAI API(OFFICIAL)"
 
         await interaction.followup.send(f"""
 ```fix
@@ -129,28 +122,34 @@ gpt-engine: {chat_engine_status}
     async def on_message(message):
         if client.is_replying_all == "True":
             username = str(message.author)
+            writer = str(message.author.name)
             user_message = str(message.content)
             if message.author == client.user:
                 return
             if client.replying_all_discord_channel_id:
                 if message.channel.id == int(client.replying_all_discord_channel_id):
-
                     client.current_channel = message.channel
                     regex = os.getenv("MESSAGE_REGEX")
                     try:
                         if re.match(regex, user_message.lower()) or client.user.mentioned_in(message):
-                            logger.info(f"\x1b[31m{username}\x1b[0m : '{user_message}' ({client.current_channel})")
+                            logger.info(
+                                f"\x1b[31m{username}\x1b[0m : '{user_message}' ({client.current_channel})")
                             await client.enqueue_message(message, user_message)
-                        else:
-                            logger.info(f'did not see my name or a mention in: {user_message}')
+
+                            if random.random() < 0.25:
+                                if writer.contains("Howler"):
+                                    await message.add_reaction("🐷")
+                                elif writer.contains("Joe"):
+                                    await message.add_reaction("🧠")
                     except re.error:
                         logger.error(f"Invalid regex: {regex}")
-            # elif isinstance(message.channel, discord.DMChannel):
-            #     logger.info(f"\x1b[31m{username}\x1b[0m : '{user_message}' (DM)")
-            #     client.current_channel = discord.DMChannel
-            #     await client.enqueue_message(message, user_message)
+            elif isinstance(message.channel, discord.DMChannel):
+                logger.info(f"\x1b[31m{username}\x1b[0m : '{user_message}' (DM)")
+                response = client.handle_response(user_message)
+                await message.channel.send(response)
             else:
-                logger.exception("replying_all_discord_channel_id not found, please use the command `/replyall` again.")
+                logger.exception(
+                    "replying_all_discord_channel_id not found, please use the command `/replyall` again.")
 
     TOKEN = os.getenv("DISCORD_BOT_TOKEN")
     client.run(TOKEN)
