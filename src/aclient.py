@@ -46,8 +46,12 @@ class aclient(discord.Client):
         self.chatbot = self.get_chatbot_model()
         self.message_queue = asyncio.Queue()
 
-    async def handle_response(self, message) -> str:
-        return await sync_to_async(self.chatbot.ask)(message)
+    async def handle_response(self, message: discord.Message) -> str:
+        try: 
+            return await asyncio.wait_for(sync_to_async(self.chatbot.ask)(message), timeout=30)
+        except asyncio.TimeoutError:
+            logger.warning("chatbot.ask took over 30 seconds with no reply.")
+        return "Pig brain is not responding - eat more bacon and try later."
 
     def get_chatbot_model(self, prompt=None) -> Chatbot:
         if not prompt:
@@ -60,8 +64,6 @@ class aclient(discord.Client):
                 while not self.message_queue.empty():
                     await self.current_channel.typing()
                     message, user_message = await self.message_queue.get()
-
-                    f"{user_message} ({self.current_channel})"
                     try:
                         await self.send_message(message, user_message)
                     except Exception as e:
@@ -70,28 +72,32 @@ class aclient(discord.Client):
                         self.message_queue.task_done()
             await asyncio.sleep(1)
 
-    async def enqueue_message(self, message, user_message):
+    async def enqueue_message(self, message: discord.Message, user_message):
         await message.response.defer(ephemeral=self.isPrivate) if self.is_replying_all == "False" else None
         await self.message_queue.put((message, user_message))
 
-    async def send_message(self, message, user_message):
-        if self.is_replying_all == "False":
-            author = message.user.id
-        else:
-            author = message.author.id
+    async def send_message(self, message: discord.Message, user_message):
+        author = message.author.id
         try:
-            response = (f'> **{user_message}** - <@{str(author)}> \n\n')
+            normal_reply = ("witty reaction" not in user_message)
+            if normal_reply:
+                response = (f'> **{user_message}** - <@{str(author)}> \n\n')
+            else:
+                response = ""
+
             model_out = await self.handle_response(user_message)
             response = f"{response}{model_out}"
             
-            logger.info(f"Model output [{len(model_out)}]: {model_out[:200]}...")
-            await send_split_message(self, response, message)
+            logger.info(f"Model output [{len(model_out)}]: {model_out[:100]}...")
+
+            if normal_reply:
+                await send_split_message(self, response, message)
+            else:
+                await message.reply(model_out, mention_author=False)
+                
         except Exception as e:
             logger.exception(f"Error while sending : {e}")
-            if self.is_replying_all == "True":
-                await message.channel.send(f"> **ERROR: Something went wrong, please try again later!** \n ```ERROR MESSAGE: {e}```")
-            else:
-                await message.followup.send(f"> **ERROR: Something went wrong, please try again later!** \n ```ERROR MESSAGE: {e}```")
+            await message.channel.send(f"> **ERROR: Something went wrong, please try again later!** \n ```ERROR MESSAGE: {e}```")
 
     async def send_start_prompt(self):
         discord_channel_id = os.getenv("DISCORD_CHANNEL_ID")

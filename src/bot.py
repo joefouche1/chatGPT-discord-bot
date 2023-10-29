@@ -3,11 +3,14 @@ import re
 import random
 import asyncio
 import discord
-
+import requests_cache
 
 from src.log import logger
 from src.aclient import aclient
 
+
+# Make cached thing
+session = requests_cache.CachedSession('hogcache', expire_after=360)
 
 # Make main client object
 client = aclient()
@@ -119,6 +122,91 @@ gpt-engine: {chat_engine_status}
 ```
 """)
 
+    @client.tree.command(name="pignews", description="Get a random news article about pigs")
+    async def pignews(interaction: discord.Interaction):
+        api_key = os.getenv('NEWS_API_KEY')  # Replace with your actual API key
+        url = f"https://newsapi.org/v2/everything?q=pig%20OR%20bacon%20OR%20hog&sortBy=relevancy&searchIn=title,description&apiKey={api_key}"
+        logger.info(f"headlines: {url}")
+        response = session.get(url)
+        data = response.json()
+        if data["articles"]:
+            art = None
+            for _ in range(10):
+                art = random.choice(data["articles"])
+                adl = art['description'].lower()
+                if 'pig' in adl or 'hog' in adl or 'bacon' in adl:
+                    break
+            else:
+                art = random.choice(data["articles"])
+            try:
+                embed = discord.Embed(title=art['title'])
+                embed.add_field(name='Description', value=art['description'], inline=False)
+                embed.add_field(name='Link', value=art['url'], inline=False)
+                embed.set_thumbnail(url=art['urlToImage'])
+                await interaction.response.send_message(embed=embed)
+            except KeyError:
+                await interaction.response.send_message("Data incomplete.")
+        else:
+            await interaction.response.send_message("No articles found.")
+
+    @client.tree.command(name='weather', description='Weather')    
+    async def weather(ctx, *, city: str):
+        city_name = city
+        base_url = "http://api.openweathermap.org/data/2.5/weather?"
+        api_key = os.getenv('WEATHER_API_KEY')
+        complete_url = base_url + "appid=" + api_key + "&q=" + city_name
+        response = session.get(complete_url)
+        # logger.info(f"weather {complete_url}")
+        x = response.json()
+ 
+        if x["cod"] != "404":
+            y = x["main"]
+            current_temperature = y["temp"]
+            current_temperature_fahrenheit = str(round((current_temperature - 273.15) * 9 / 5 + 32))
+            current_pressure = y["pressure"]
+            current_pressure_mmHg = str(round(current_pressure * 0.750062))  # Convert pressure from hPa to mmHg
+            current_humidity = y["humidity"]
+            z = x["weather"]
+            weather_description = z[0]["description"]
+            embed = discord.Embed(title=f"Weather in {city_name}", color=ctx.guild.me.top_role.color, timestamp=ctx.created_at)
+            embed.add_field(name="Description", value=f"**{weather_description}**", inline=False)
+            embed.add_field(name="Temperature(F)", value=f"**{current_temperature_fahrenheit}°F**", inline=False)
+            embed.add_field(name="Humidity(%)", value=f"**{current_humidity}%**", inline=False)
+            embed.add_field(name="Atmospheric Pressure(mmHg)", value=f"**{current_pressure_mmHg}mmHg**", inline=False)
+            icon = z[0]["icon"]
+            embed.set_thumbnail(url=f"https://openweathermap.org/img/w/{icon}.png")
+            embed.set_footer(text=f"Requested by {ctx.user.name}")
+            await ctx.response.send_message(embed=embed)
+        else:
+            await ctx.response.send_message("City not found. Type as follows: Pittsburgh OR Pittsburgh,PA,US OR London,UK")
+
+    @client.tree.command(name="magic8ball", description="Ask the magic 8-ball a question")
+    async def magic8ball(interaction: discord.Interaction, *, question: str):
+        responses = [
+            "It is certain.",
+            "It is decidedly so.",
+            "Without a doubt.",
+            "Yes - definitely.",
+            "You may rely on it.",
+            "As I see it, yes.",
+            "Most likely.",
+            "Outlook good.",
+            "Yes.",
+            "Signs point to yes.",
+            "Reply hazy, try again.",
+            "Ask again later.",
+            "Better not tell you now.",
+            "Cannot predict now.",
+            "Concentrate and ask again.",
+            "Don't count on it.",
+            "My reply is no.",
+            "My sources say no.",
+            "Outlook not so good.",
+            "Very doubtful.",
+        ]
+        response = random.choice(responses)
+        await interaction.response.send_message(f"Question: {question}\nAnswer: {response}")
+
     @client.event
     async def on_message(message):
         in_channels = (message.channel.id in client.replying_all_discord_channel_ids)
@@ -131,8 +219,6 @@ gpt-engine: {chat_engine_status}
         if (message.author != client.user) and (in_channels or is_dm):
             client.current_channel = message.channel
             regex = os.getenv("MESSAGE_REGEX")
-
-
             try:
                 if re.match(regex, user_message.lower()) or client.user.mentioned_in(message) or is_dm:
                     # ACTIVATE THE PIG
@@ -149,6 +235,20 @@ gpt-engine: {chat_engine_status}
                             await message.add_reaction("🧠")
             except re.error:
                 logger.error(f"Invalid regex: {regex}")
+
+        if (message.author == client.user) and message.embeds:
+            ezero = message.embeds[0]
+            logger.info(f"Found something we said with embeds: {ezero.fields}")
+            react_to = None
+            for field in ezero.fields:
+                # logger.info(f"Field name: {field.name}, Field value: {field.value}")
+                if field.name == 'Description':
+                    react_to = ezero.title + ": " + field.value
+                    logger.info(f"Found summary for {ezero.title} posting")
+            if react_to:
+                user_message = f"Give a short, witty reaction to this headline: {react_to}"
+                logger.info(f"\x1b[31m{username}\x1b[0m : '{user_message}' ({client.current_channel})")
+                await client.enqueue_message(message, user_message)
         #     response = client.handle_response(user_message)
         #     await message.channel.send(response)
         # else:
