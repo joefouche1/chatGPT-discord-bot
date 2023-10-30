@@ -9,16 +9,18 @@ from src.log import logger
 from src.aclient import aclient
 
 
-# Make cached thing
+# Create a cached session for requests
 session = requests_cache.CachedSession('hogcache', expire_after=360)
 
-# Make main client object
+# Instantiate the main client object
 client = aclient()
 
 
+# Function to run the discord bot
 def run_discord_bot():
     @client.event
     async def on_ready():
+        """Event handler for when the bot is ready."""
         client.is_replying_all = os.getenv("REPLYING_ALL", "False")
         await client.send_start_prompt()
         await client.tree.sync()
@@ -27,75 +29,19 @@ def run_discord_bot():
         logger.info(
             f'{client.user} is now running! listening on {client.replying_all_discord_channel_ids}')
 
-    @client.tree.command(name="chat", description="Have a chat with ChatGPT")
-    async def chat(interaction: discord.Interaction, *, message: str):
-        if client.is_replying_all == "True":
-            await interaction.response.defer(ephemeral=False)
-            await interaction.followup.send(
-                "> **WARN: You already on replyAll mode. If you want to use the Slash Command, switch to normal mode by using `/replyall` again**")
-            logger.warning(
-                "\x1b[31mYou already on replyAll mode, can't use slash command!\x1b[0m")
-            return
-        if interaction.user == client.user:
-            return
-        username = str(interaction.user)
-        client.current_channel = interaction.channel
-        logger.info(
-            f"\x1b[31m{username}\x1b[0m : /chat [{message}] in ({client.current_channel})")
-
-        await client.enqueue_message(interaction, message)
-
-    @client.tree.command(name="private", description="Toggle private access")
-    async def private(interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=False)
-        if not client.isPrivate:
-            client.isPrivate = not client.isPrivate
-            logger.warning("\x1b[31mSwitch to private mode\x1b[0m")
-            await interaction.followup.send(
-                "> **INFO: Next, the response will be sent via private reply. If you want to switch back to public mode, use `/public`**")
-        else:
-            logger.info("You already on private mode!")
-            await interaction.followup.send(
-                "> **WARN: You already on private mode. If you want to switch to public mode, use `/public`**")
-
-    @client.tree.command(name="public", description="Toggle public access")
-    async def public(interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=False)
-        if client.isPrivate:
-            client.isPrivate = not client.isPrivate
-            await interaction.followup.send(
-                "> **INFO: Next, the response will be sent to the channel directly. If you want to switch back to private mode, use `/private`**")
-            logger.warning("\x1b[31mSwitch to public mode\x1b[0m")
-        else:
-            await interaction.followup.send(
-                "> **WARN: You already on public mode. If you want to switch to private mode, use `/private`**")
-            logger.info("You already on public mode!")
-
-    @client.tree.command(name="replyall", description="Toggle replyAll access")
-    async def replyall(interaction: discord.Interaction):
-        client.replying_all_discord_channel_id = str(interaction.channel_id)
-        await interaction.response.defer(ephemeral=False)
-        if client.is_replying_all == "True":
-            client.is_replying_all = "False"
-            await interaction.followup.send(
-                "> **INFO: Next, the bot will response to the Slash Command. If you want to switch back to replyAll mode, use `/replyAll` again**")
-            logger.warning("\x1b[31mSwitch to normal mode\x1b[0m")
-        elif client.is_replying_all == "False":
-            client.is_replying_all = "True"
-            await interaction.followup.send(
-                "> **INFO: Next, the bot will disable Slash Command and responding to all message in this channel only. If you want to switch back to normal mode, use `/replyAll` again**")
-            logger.warning("\x1b[31mSwitch to replyAll mode\x1b[0m")
 
     @client.tree.command(name="reset", description="Complete reset conversation history")
     async def reset(interaction: discord.Interaction):
+        """Command to reset the conversation history."""
         await interaction.response.defer(ephemeral=False)
-        client.chatbot = client.get_chatbot_model()
+        await client.ainit_history()
         await interaction.followup.send("> **INFO: I have forgotten everything.**")
         logger.warning(
             f"\x1b[31m{client.chat_model} bot has been successfully reset\x1b[0m")
 
     @client.tree.command(name="help", description="Show help for the bot")
     async def help(interaction: discord.Interaction):
+        """Command to show help for the bot."""
         await interaction.response.defer(ephemeral=False)
         await interaction.followup.send(""":star: **BASIC COMMANDS** \n
         - `/chat [message]` Chat with ChatGPT!
@@ -111,6 +57,7 @@ def run_discord_bot():
 
     @client.tree.command(name="info", description="Bot information")
     async def info(interaction: discord.Interaction):
+        """Command to show bot information."""
         await interaction.response.defer(ephemeral=False)
         chat_engine_status = client.openAI_gpt_engine
         chat_model_status = "OpenAI API(OFFICIAL)"
@@ -124,6 +71,7 @@ gpt-engine: {chat_engine_status}
 
     @client.tree.command(name="pignews", description="Get a random news article about pigs")
     async def pignews(interaction: discord.Interaction):
+        """Command to get a random news article about pigs."""
         api_key = os.getenv('NEWS_API_KEY')  # Replace with your actual API key
         url = f"https://newsapi.org/v2/everything?q=pig%20OR%20bacon%20OR%20hog&sortBy=relevancy&searchIn=title,description&apiKey={api_key}"
         logger.info(f"headlines: {url}")
@@ -151,6 +99,7 @@ gpt-engine: {chat_engine_status}
 
     @client.tree.command(name='weather', description='Weather')    
     async def weather(ctx, *, city: str):
+        """Command to get the weather of a city."""
         city_name = city
         base_url = "http://api.openweathermap.org/data/2.5/weather?"
         api_key = os.getenv('WEATHER_API_KEY')
@@ -182,6 +131,7 @@ gpt-engine: {chat_engine_status}
 
     @client.tree.command(name="magic8ball", description="Ask the magic 8-ball a question")
     async def magic8ball(interaction: discord.Interaction, *, question: str):
+        """Command to ask the magic 8-ball a question."""
         responses = [
             "It is certain.",
             "It is decidedly so.",
@@ -209,6 +159,7 @@ gpt-engine: {chat_engine_status}
 
     @client.event
     async def on_message(message):
+        """Event handler for when a message is received."""
         in_channels = (message.channel.id in client.replying_all_discord_channel_ids)
         is_dm = isinstance(message.channel, discord.DMChannel)
 
@@ -222,8 +173,9 @@ gpt-engine: {chat_engine_status}
             try:
                 if re.match(regex, user_message.lower()) or client.user.mentioned_in(message) or is_dm:
                     # ACTIVATE THE PIG
-                    if ',' in user_message:
-                        user_message = user_message.split(',', 1)[1].strip()
+                    # is it better to strip the hog honorifics?
+                    #if ',' in user_message:
+                    #    user_message = user_message.split(',', 1)[1].strip()
                     logger.info(
                         f"\x1b[31m{username}\x1b[0m : '{user_message}' ({client.current_channel})")
                     await client.enqueue_message(message, user_message)
