@@ -33,20 +33,17 @@ class aclient(discord.Client):
         intents = discord.Intents.default()
         intents.message_content = True
         super().__init__(intents=intents)
+
         self.tree = app_commands.CommandTree(self)
         self.current_channel = None
-        self.activity = discord.Activity(type=discord.ActivityType.listening, name="/chat | /help")
+        self.activity = discord.Activity(type=discord.ActivityType.listening, name="bacon sizzle")
         self.isPrivate = False
         self.is_replying_all = os.getenv("REPLYING_ALL")
-        
         self.replying_all_discord_channel_ids = set(int(id) for id in os.getenv("REPLYING_ALL_DISCORD_CHANNEL_IDS").split(','))
 
-        openai.api_key = os.getenv("OPENAI_API_KEY")
         self.openAI_API_key = os.getenv("OPENAI_API_KEY")
+        openai.api_key = self.openAI_API_key
         self.openAI_gpt_engine = os.getenv("GPT_ENGINE")
-        self.chatgpt_session_token = os.getenv("SESSION_TOKEN")
-        self.chatgpt_access_token = os.getenv("ACCESS_TOKEN")
-        self.chatgpt_paid = os.getenv("PUID")
 
         config_dir = os.path.abspath(f"{__file__}/../../")
         prompt_name = 'system_prompt.txt'
@@ -65,6 +62,7 @@ class aclient(discord.Client):
         )
 
         self.conversation_history = None
+        self.history_lock = asyncio.Lock()
         self.init_history()
         self.message_queue = asyncio.Queue()
 
@@ -110,7 +108,6 @@ class aclient(discord.Client):
                     break
         except asyncio.TimeoutError:
             logger.warning("handle_response took over 40 seconds with no reply.")
-        
         # Add the model's response to the conversation history
         self.conversation_history.append({
             "role": "assistant",
@@ -138,14 +135,15 @@ class aclient(discord.Client):
         num_tokens += 5  # every reply is primed with <im_start>assistant
         return num_tokens
 
-    def __truncate_conversation(self, convo_id: str = "default") -> None:
+    async def __truncate_conversation(self, convo_id: str = "default") -> None:
         """
         Truncate the conversation
         """
         while True:
             if (self.get_token_count(convo_id) > self.truncate_limit and len(self.conversation_history) > 1):
                 # Don't remove the first message
-                self.conversation_history.pop(1)
+                async with self.history_lock:
+                    self.conversation_history.pop(1)
                 logger.info("popped an old message!")
             else:
                 break
@@ -155,12 +153,15 @@ class aclient(discord.Client):
         Adds the user's message to the conversation history and initializes the chat models with the conversation history.
         """
         if message:
-            # Add the user's message to the conversation history
-            self.conversation_history.append({
-                "role": "user",
-                "content": message
-            })     
-        self.__truncate_conversation()
+            # Acquire the lock before modifying the conversation_history
+            async with self.history_lock:
+                # Add the user's message to the conversation history
+                self.conversation_history.append({
+                    "role": "user",
+                    "content": message
+                })
+
+        await self.__truncate_conversation()
 
         if self.conversation_history is None:
             logger.warning("No history is set!")
@@ -222,7 +223,7 @@ class aclient(discord.Client):
                 await send_split_message(self, response, message)
             else:
                 await message.reply(model_out, mention_author=False)
-                
+
         except Exception as e:
             logger.exception(f"Error while sending : {e}")
             await message.channel.send(f"> **ERROR: Something went wrong, please try again later!** \n ```ERROR MESSAGE: {e}```")

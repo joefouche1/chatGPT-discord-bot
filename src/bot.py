@@ -29,7 +29,6 @@ def run_discord_bot():
         logger.info(
             f'{client.user} is now running! listening on {client.replying_all_discord_channel_ids}')
 
-
     @client.tree.command(name="reset", description="Complete reset conversation history")
     async def reset(interaction: discord.Interaction):
         """Command to reset the conversation history."""
@@ -97,7 +96,7 @@ gpt-engine: {chat_engine_status}
         else:
             await interaction.response.send_message("No articles found.")
 
-    @client.tree.command(name='weather', description='Weather')    
+    @client.tree.command(name='weather', description='Weather')
     async def weather(ctx, *, city: str):
         """Command to get the weather of a city."""
         city_name = city
@@ -107,7 +106,7 @@ gpt-engine: {chat_engine_status}
         response = session.get(complete_url)
         # logger.info(f"weather {complete_url}")
         x = response.json()
- 
+
         if x["cod"] != "404":
             y = x["main"]
             current_temperature = y["temp"]
@@ -166,7 +165,7 @@ gpt-engine: {chat_engine_status}
         username = str(message.author)
         user_message = str(message.content)
         writer = str(message.author.name)
-       
+
         if (message.author != client.user) and (in_channels or is_dm):
             client.current_channel = message.channel
             regex = os.getenv("MESSAGE_REGEX")
@@ -174,7 +173,7 @@ gpt-engine: {chat_engine_status}
                 if re.match(regex, user_message.lower()) or client.user.mentioned_in(message) or is_dm:
                     # ACTIVATE THE PIG
                     # is it better to strip the hog honorifics?
-                    #if ',' in user_message:
+                    # if ',' in user_message:
                     #    user_message = user_message.split(',', 1)[1].strip()
                     logger.info(
                         f"\x1b[31m{username}\x1b[0m : '{user_message}' ({client.current_channel})")
