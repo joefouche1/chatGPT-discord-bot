@@ -37,13 +37,13 @@ class aclient(discord.Client):
         self.tree = app_commands.CommandTree(self)
         self.current_channel = None
         self.activity = discord.Activity(type=discord.ActivityType.listening, name="bacon sizzle")
-        self.isPrivate = False
-        self.is_replying_all = os.getenv("REPLYING_ALL")
+        
         self.replying_all_discord_channel_ids = set(int(id) for id in os.getenv("REPLYING_ALL_DISCORD_CHANNEL_IDS").split(','))
 
         self.openAI_API_key = os.getenv("OPENAI_API_KEY")
         openai.api_key = self.openAI_API_key
         self.openAI_gpt_engine = os.getenv("GPT_ENGINE")
+        self.temperature = 0.75
 
         config_dir = os.path.abspath(f"{__file__}/../../")
         prompt_name = 'system_prompt.txt'
@@ -100,7 +100,7 @@ class aclient(discord.Client):
                     if len(response) > 20 and not spoke:
                         logger.info(f"Response has started with: {response}")
                         spoke = True
-                    if len(response) % 500 > 0 and not spoke2:
+                    elif len(response) % 500 > 0 and spoke and (not spoke2):
                         logger.info(f"Response is up to {len(response)}")
                         spoke2 = True
                 except StopAsyncIteration:
@@ -152,7 +152,15 @@ class aclient(discord.Client):
         """
         Adds the user's message to the conversation history and initializes the chat models with the conversation history.
         """
+        engine = self.openAI_gpt_engine
         if message:
+            # Check if the current message contains the tag *GPT4*
+            if "*GPT4*" in message:
+                engine = 'gpt-4'
+                # Remove the gpt4 hint from the content
+                logger.info("Using GPT4 for current activity")
+                message = message.replace("*GPT4*", "") 
+        
             # Acquire the lock before modifying the conversation_history
             async with self.history_lock:
                 # Add the user's message to the conversation history
@@ -165,10 +173,12 @@ class aclient(discord.Client):
 
         if self.conversation_history is None:
             logger.warning("No history is set!")
+
         # Initialize the chat models with the conversation history
         completion = await openai.ChatCompletion.acreate(
-            model=self.openAI_gpt_engine,
+            model=engine,
             messages=self.conversation_history,
+            temperature=self.temperature,
             stream=True
         )
 

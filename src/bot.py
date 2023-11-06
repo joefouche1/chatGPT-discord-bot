@@ -74,7 +74,12 @@ gpt-engine: {chat_engine_status}
         api_key = os.getenv('NEWS_API_KEY')  # Replace with your actual API key
         url = f"https://newsapi.org/v2/everything?q=pig%20OR%20bacon%20OR%20hog&sortBy=relevancy&searchIn=title,description&apiKey={api_key}"
         logger.info(f"headlines: {url}")
-        response = session.get(url)
+        try:
+            response = session.get(url)
+        except Exception as e:
+            logger.error(f"Error while retrieving news: {e}")
+            await interaction.response.send_message("Error while retrieving news. Please try again later.")
+            return
         data = response.json()
         if data["articles"]:
             art = None
