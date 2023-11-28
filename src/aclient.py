@@ -7,9 +7,12 @@ from src.log import logger
 from utils.message_utils import send_split_message
 
 from dotenv import load_dotenv
+
 from discord import app_commands
 
-import openai
+from openai import AsyncOpenAI
+
+
 import tiktoken
 
 load_dotenv()
@@ -25,6 +28,7 @@ class aclient(discord.Client):
     This class is a subclass of discord.Client and handles the interaction with the Discord API and the OpenAI API.
     It initializes the chatbot model and processes incoming messages.
     """
+
     def __init__(self) -> None:
         """
         Initializes the aclient class with default intents, command tree, activity, and environment variables.
@@ -36,15 +40,17 @@ class aclient(discord.Client):
 
         self.tree = app_commands.CommandTree(self)
         self.current_channel = None
-        self.activity = discord.Activity(type=discord.ActivityType.listening, name="bacon sizzle")
-        
-        self.replying_all_discord_channel_ids = set(int(id) for id in os.getenv("REPLYING_ALL_DISCORD_CHANNEL_IDS").split(','))
+        self.activity = discord.Activity(
+            type=discord.ActivityType.listening, name="bacon sizzle")
+
+        self.replying_all_discord_channel_ids = set(
+            int(id) for id in os.getenv("REPLYING_ALL_DISCORD_CHANNEL_IDS").split(','))
 
         self.openAI_API_key = os.getenv("OPENAI_API_KEY")
-        openai.api_key = self.openAI_API_key
         self.openAI_gpt_engine = os.getenv("GPT_ENGINE")
         self.temperature = 0.75
-
+        self.client = AsyncOpenAI()
+ 
         config_dir = os.path.abspath(f"{__file__}/../../")
         prompt_name = 'system_prompt.txt'
         prompt_path = os.path.join(config_dir, prompt_name)
@@ -96,24 +102,64 @@ class aclient(discord.Client):
             while True:
                 try:
                     token = await asyncio.wait_for(async_generator.__anext__(), timeout=40)
-                    response += token
-                    if len(response) > 20 and not spoke:
-                        logger.info(f"Response has started with: {response}")
-                        spoke = True
-                    elif len(response) % 500 > 0 and spoke and (not spoke2):
-                        logger.info(f"Response is up to {len(response)}")
-                        spoke2 = True
+                    if token is not None:
+                        response += token
+                        if len(response) > 0 and not spoke:
+                            logger.info(f"Response has started with: {response}")
+                            spoke = True
+                        elif len(response) % 500 > 0 and spoke and (not spoke2):
+                            logger.info(f"Response is up to {len(response)}")
+                            spoke2 = True
                 except StopAsyncIteration:
                     # This exception is raised when the async generator is exhausted
                     break
         except asyncio.TimeoutError:
-            logger.warning("handle_response took over 40 seconds with no reply.")
+            logger.warning(
+                "handle_response took over 40 seconds with no reply.")
         # Add the model's response to the conversation history
         self.conversation_history.append({
             "role": "assistant",
             "content": response
         })
         return response
+
+    async def handle_image_attachment(self, message: discord.Message, user_message: str) -> str:
+        """
+            Attempt to deal with an attached picture as a special request
+
+            Discord urls can be resized.
+        """
+        img_url = message.attachments[0].url + "?width=500&height=500"
+
+        logger.info(f"Prompting with photo at {img_url}")
+        # Craft the prompt for GPT
+        prompt_message = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": user_message
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": img_url
+                        }
+                    }
+                ]
+            }
+        ]
+        newhist = self.conversation_history + prompt_message
+
+        # Initialize the chat models with the conversation history
+        completion = await self.client.chat.completions.create(
+            model="gpt-4-vision-preview",
+            messages=newhist,
+            temperature=self.temperature,
+            max_tokens=2000
+        )
+        return completion.choices[0].message.content
 
     # https://github.com/openai/openai-cookbook/blob/main/examples/How_to_count_tokens_with_tiktoken.ipynb
     def get_token_count(self, convo_id: str = "default") -> int:
@@ -159,8 +205,8 @@ class aclient(discord.Client):
                 engine = 'gpt-4'
                 # Remove the gpt4 hint from the content
                 logger.info("Using GPT4 for current activity")
-                message = message.replace("*GPT4*", "") 
-        
+                message = message.replace("*GPT4*", "")
+
             # Acquire the lock before modifying the conversation_history
             async with self.history_lock:
                 # Add the user's message to the conversation history
@@ -175,20 +221,18 @@ class aclient(discord.Client):
             logger.warning("No history is set!")
 
         # Initialize the chat models with the conversation history
-        completion = await openai.ChatCompletion.acreate(
-            model=engine,
-            messages=self.conversation_history,
-            temperature=self.temperature,
-            stream=True
-        )
+        stream = await self.client.chat.completions.create(model=engine,
+                        messages=self.conversation_history,
+                        temperature=self.temperature,
+                        max_tokens=4000,
+                        stream=True)
 
-        async for chunk in completion:
-            dd = chunk.choices[0].delta
-            if 'content' in dd:
+        async for completion in stream:
+            #print(completion.model_dump_json())
+            dd = completion.choices[0].delta
+            if dd.content is not None:
                 yield dd.content
-            else:
-                break
-
+        
     async def process_messages(self):
         """
         Processes incoming messages and sends them to the chatbot model for a response.
@@ -201,7 +245,8 @@ class aclient(discord.Client):
                     try:
                         await self.send_message(message, user_message)
                     except Exception as e:
-                        logger.exception(f"Error while processing message: {e}")
+                        logger.exception(
+                            f"Error while processing message: {e}")
                     finally:
                         self.message_queue.task_done()
             await asyncio.sleep(1)
@@ -219,24 +264,46 @@ class aclient(discord.Client):
         """
         author = message.author.id
         try:
-            normal_reply = ("witty reaction" not in user_message)
-            if normal_reply:
-                response = (f'> **{user_message}** - <@{str(author)}> \n\n')
-            else:
-                response = ""
+            # Check if the message has any attachments
+            if message.attachments:
+                # If there are attachments, call a different handler
+                img_reply = await self.handle_image_attachment(message, user_message)
+                logger.info(f"Response complete [size {len(img_reply)}]")
+                await send_split_message(self, img_reply, message)
 
-            model_out = await self.handle_response(user_message)
-            response = f"{response}{model_out}"
-            logger.info(f"Response complete [size {len(model_out)}]")
-
-            if normal_reply:
-                await send_split_message(self, response, message)
             else:
-                await message.reply(model_out, mention_author=False)
+                normal_reply = ("witty reaction" not in user_message)
+                if normal_reply:
+                    response = (
+                        f'> **{user_message}** - <@{str(author)}> \n\n')
+                else:
+                    response = ""
+
+                model_out = await self.handle_response(user_message)
+                response = f"{response}{model_out}"
+                logger.info(f"Response complete [size {len(model_out)}]")
+
+                if normal_reply:
+                    await send_split_message(self, response, message)
+                else:
+                    await message.reply(model_out, mention_author=False)
 
         except Exception as e:
             logger.exception(f"Error while sending : {e}")
             await message.channel.send(f"> **ERROR: Something went wrong, please try again later!** \n ```ERROR MESSAGE: {e}```")
+
+    async def draw(self, prompt) -> list[str]:
+
+        response = await self.client.images.generate(
+            model="dall-e-3",
+            prompt=prompt,
+            n=1,
+            size="1024x1024",
+            quality="standard",
+        )
+        image_url = response.data[0].url
+
+        return image_url
 
     async def send_start_prompt(self):
         """
@@ -253,7 +320,8 @@ class aclient(discord.Client):
                         await channel.send(response)
                     logger.info(f"System prompt response:{response}")
                 else:
-                    logger.info("No Channel selected. Skip sending system prompt.")
+                    logger.info(
+                        "No Channel selected. Skip sending system prompt.")
             else:
                 logger.info("Not given starting prompt. Skipping...")
         except Exception as e:

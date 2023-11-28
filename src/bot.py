@@ -3,6 +3,8 @@ import re
 import random
 import asyncio
 import discord
+from discord import Embed
+
 import requests_cache
 
 from src.log import logger
@@ -132,6 +134,34 @@ gpt-engine: {chat_engine_status}
             await ctx.response.send_message(embed=embed)
         else:
             await ctx.response.send_message("City not found. Type as follows: Pittsburgh OR Pittsburgh,PA,US OR London,UK")
+
+    @client.tree.command(name="draw", description="Generate an image with the Dall-e-3 model")
+    async def draw(interaction: discord.Interaction, *, prompt: str):
+        if interaction.user == client.user:
+            return
+
+        username = str(interaction.user)
+        channel = str(interaction.channel)
+        logger.info(
+            f"\x1b[31m{username}\x1b[0m : /draw [{prompt}] in ({channel})")
+
+        await interaction.response.defer(thinking=True, ephemeral=False)
+        try:
+            image_url = await client.draw(prompt)
+            # Create an Embed object that includes the image and some text
+            embed = Embed(description=prompt, title="AI hog generated image")
+            embed.set_image(url=image_url)
+            await interaction.followup.send("Here you go!", embed=embed)
+
+        except Exception as e:
+            if 'content_policy_violation' in str(e):
+                # Send a funny admonishment to the user
+                await interaction.response.send_message(
+                f'> **Oops! Your prompt [{prompt}] seems to have violated the OpenAI content policy. Let\'s keep it clean and fun, shall we?**')
+            else:  
+                await interaction.followup.send(f'> **Something Went Wrong: {e}**')
+
+            logger.info(f"\x1b[31m{username}\x1b[0m :{e}")
 
     @client.tree.command(name="magic8ball", description="Ask the magic 8-ball a question")
     async def magic8ball(interaction: discord.Interaction, *, question: str):
