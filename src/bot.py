@@ -6,7 +6,7 @@ import discord
 from discord import Embed
 import aiohttp
 import io
-from io import BytesIO
+
 
 import requests_cache
 
@@ -77,7 +77,13 @@ gpt-engine: {chat_engine_status}
     async def pignews(interaction: discord.Interaction):
         """Command to get a random news article about pigs."""
         api_key = os.getenv('NEWS_API_KEY')  # Replace with your actual API key
-        url = f"https://newsapi.org/v2/everything?q=pig%20OR%20bacon%20OR%20hog&sortBy=relevancy&searchIn=title,description&apiKey={api_key}"
+        url = (
+            "https://newsapi.org/v2/everything?"
+            "q=pig%20OR%20bacon%20OR%20hog&"
+            "sortBy=relevancy&"
+            "searchIn=title,description&"
+            f"apiKey={api_key}"
+        )
         logger.info(f"headlines: {url}")
         try:
             response = session.get(url)
@@ -97,7 +103,8 @@ gpt-engine: {chat_engine_status}
                 art = random.choice(data["articles"])
             try:
                 embed = discord.Embed(title=art['title'])
-                embed.add_field(name='Description', value=art['description'], inline=False)
+                embed.add_field(name='Description',
+                                value=art['description'], inline=False)
                 embed.add_field(name='Link', value=art['url'], inline=False)
                 embed.set_thumbnail(url=art['urlToImage'])
                 await interaction.response.send_message(embed=embed)
@@ -120,23 +127,32 @@ gpt-engine: {chat_engine_status}
         if x["cod"] != "404":
             y = x["main"]
             current_temperature = y["temp"]
-            current_temperature_fahrenheit = str(round((current_temperature - 273.15) * 9 / 5 + 32))
+            current_temperature_fahrenheit = str(
+                round((current_temperature - 273.15) * 9 / 5 + 32))
             current_pressure = y["pressure"]
-            current_pressure_mmHg = str(round(current_pressure * 0.750062))  # Convert pressure from hPa to mmHg
+            # Convert pressure from hPa to mmHg
+            current_pressure_mmHg = str(round(current_pressure * 0.750062))
             current_humidity = y["humidity"]
             z = x["weather"]
             weather_description = z[0]["description"]
-            embed = discord.Embed(title=f"Weather in {city_name}", color=ctx.guild.me.top_role.color, timestamp=ctx.created_at)
-            embed.add_field(name="Description", value=f"**{weather_description}**", inline=False)
-            embed.add_field(name="Temperature(F)", value=f"**{current_temperature_fahrenheit}°F**", inline=False)
-            embed.add_field(name="Humidity(%)", value=f"**{current_humidity}%**", inline=False)
-            embed.add_field(name="Atmospheric Pressure(mmHg)", value=f"**{current_pressure_mmHg}mmHg**", inline=False)
+            embed = discord.Embed(
+                title=f"Weather in {city_name}", color=ctx.guild.me.top_role.color, timestamp=ctx.created_at)
+            embed.add_field(name="Description",
+                            value=f"**{weather_description}**", inline=False)
+            embed.add_field(
+                name="Temperature(F)", value=f"**{current_temperature_fahrenheit}°F**", inline=False)
+            embed.add_field(name="Humidity(%)",
+                            value=f"**{current_humidity}%**", inline=False)
+            embed.add_field(name="Atmospheric Pressure(mmHg)",
+                            value=f"**{current_pressure_mmHg}mmHg**", inline=False)
             icon = z[0]["icon"]
-            embed.set_thumbnail(url=f"https://openweathermap.org/img/w/{icon}.png")
+            embed.set_thumbnail(
+                url=f"https://openweathermap.org/img/w/{icon}.png")
             embed.set_footer(text=f"Requested by {ctx.user.name}")
             await ctx.response.send_message(embed=embed)
         else:
-            await ctx.response.send_message("City not found. Type as follows: Pittsburgh OR Pittsburgh,PA,US OR London,UK")
+            await ctx.response.send_message("City not found. Type as follows: Pittsburgh "
+                                            "OR Pittsburgh,PA,US OR London,UK")
 
     @client.tree.command(name="draw", description="Generate an image with the Dall-e-3 model")
     async def draw(interaction: discord.Interaction, *, prompt: str):
@@ -151,14 +167,15 @@ gpt-engine: {chat_engine_status}
         await interaction.response.defer(thinking=True, ephemeral=False)
         try:
             image_url = await client.draw(prompt)
-            
+
             # Download the image
             async with aiohttp.ClientSession() as session:
                 async with session.get(image_url) as resp:
                     image_data = await resp.read()
 
             # Create a discord.File object
-            image_file = discord.File(io.BytesIO(image_data), filename="image.png")
+            image_file = discord.File(io.BytesIO(
+                image_data), filename="image.png")
 
             # Create an Embed object that includes the image
             embed = Embed(description=prompt, title="AI hog generated image")
@@ -171,8 +188,9 @@ gpt-engine: {chat_engine_status}
             if 'content_policy_violation' in str(e):
                 # Send a funny admonishment to the user
                 await interaction.response.send_message(
-                f'> **Oops! Your prompt [{prompt}] seems to have violated the OpenAI content policy. Let\'s keep it clean and fun, shall we?**')
-            else:  
+                    f'> **Oops! Your prompt [{prompt}] seems to have violated '
+                    'the OpenAI content policy. Let\'s keep it clean and fun, shall we?**')
+            else:
                 await interaction.followup.send(f'> **Something Went Wrong: {e}**')
 
             logger.info(f"\x1b[31m{username}\x1b[0m :{e}")
@@ -208,7 +226,8 @@ gpt-engine: {chat_engine_status}
     @client.event
     async def on_message(message):
         """Event handler for when a message is received."""
-        in_channels = (message.channel.id in client.replying_all_discord_channel_ids)
+        in_channels = (
+            message.channel.id in client.replying_all_discord_channel_ids)
         is_dm = isinstance(message.channel, discord.DMChannel)
 
         username = str(message.author)
@@ -247,15 +266,9 @@ gpt-engine: {chat_engine_status}
                     logger.info(f"Found summary for {ezero.title} posting")
             if react_to:
                 user_message = f"Give a short, witty reaction to this headline: {react_to}"
-                logger.info(f"\x1b[31m{username}\x1b[0m : '{user_message}' ({client.current_channel})")
+                logger.info(
+                    f"\x1b[31m{username}\x1b[0m : '{user_message}' ({client.current_channel})")
                 await client.enqueue_message(message, user_message)
-        #     response = client.handle_response(user_message)
-        #     await message.channel.send(response)
-        # else:
-        #    logger.info(f"ignoring message in {message.channel.id} from {message.author}: set membership {in_channels}")
-        # else:
-        #     logger.exception(
-        #         "replying_all_discord_channel_id not found, please use the command `/replyall` again.")
 
     TOKEN = os.getenv("DISCORD_BOT_TOKEN")
     client.run(TOKEN)

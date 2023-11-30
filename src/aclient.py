@@ -21,6 +21,8 @@ load_dotenv()
 This module contains the aclient class which is a subclass of discord.Client.
 It handles the interaction with the Discord API and the OpenAI API.
 """
+
+
 class ConversationManager:
     def __init__(self):
         self.conversation_history = []
@@ -30,7 +32,8 @@ class ConversationManager:
 
     def get_history(self):
         return self.conversation_history
-    
+
+
 class aclient(discord.Client):
     """
     This class is a subclass of discord.Client and handles the interaction with the Discord API and the OpenAI API.
@@ -59,7 +62,7 @@ class aclient(discord.Client):
         self.openAI_gpt_engine = os.getenv("GPT_ENGINE")
         self.temperature = 0.75
         self.client = AsyncOpenAI()
- 
+
         config_dir = os.path.abspath(f"{__file__}/../../")
         prompt_name = 'system_prompt.txt'
         prompt_path = os.path.join(config_dir, prompt_name)
@@ -114,7 +117,8 @@ class aclient(discord.Client):
                     if token is not None:
                         response += token
                         if len(response) > 0 and not spoke:
-                            logger.info(f"Response has started with: {response}")
+                            logger.info(
+                                f"Response has started with: {response}")
                             spoke = True
                         elif len(response) % 500 > 0 and spoke and (not spoke2):
                             logger.info(f"Response is up to {len(response)}")
@@ -205,7 +209,8 @@ class aclient(discord.Client):
 
     async def ask_stream_async(self, message=None):
         """
-        Adds the user's message to the conversation history and initializes the chat models with the conversation history.
+        Adds the user's message to the conversation history and initializes
+        the chat models with the conversation history.
         """
         engine = self.openAI_gpt_engine
         if message:
@@ -231,17 +236,17 @@ class aclient(discord.Client):
 
         # Initialize the chat models with the conversation history
         stream = await self.client.chat.completions.create(model=engine,
-                        messages=self.conversation_history,
-                        temperature=self.temperature,
-                        max_tokens=4000,
-                        stream=True)
+                                                           messages=self.conversation_history,
+                                                           temperature=self.temperature,
+                                                           max_tokens=4000,
+                                                           stream=True)
 
         async for completion in stream:
-            #print(completion.model_dump_json())
+            # print(completion.model_dump_json())
             dd = completion.choices[0].delta
             if dd.content is not None:
                 yield dd.content
-        
+
     async def process_messages(self):
         while True:
             # This will block until a message is available
@@ -289,7 +294,7 @@ class aclient(discord.Client):
 
         except Exception as e:
             logger.exception(f"Error while sending : {e}")
-            await message.channel.send(f"> **ERROR: Something went wrong, please try again later!** \n ```ERROR MESSAGE: {e}```")
+            await message.channel.send(f"> **ERROR: Something went wrong.** \n ```ERROR MESSAGE: {e}```")
 
     async def draw(self, prompt) -> list[str]:
 

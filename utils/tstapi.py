@@ -4,17 +4,17 @@ import asyncio
 
 load_dotenv()
 
+
 async def test_api():
     client = AsyncOpenAI()
 
     stream = await client.chat.completions.create(model="gpt-3.5-turbo",
                                                   stream=True,
                                                   max_tokens=1000,
-                                                    messages=[{"role": "user", "content": "Oink oink! What's the diameter of the average avocado?"}])
-    
+                                                  messages=[{"role": "user", "content": "Oink oink! What's the diameter of the average avocado?"}])
+
     async for completion in stream:
         print(completion.model_dump_json())
-        
 
 # Create an event loop
 loop = asyncio.get_event_loop()
