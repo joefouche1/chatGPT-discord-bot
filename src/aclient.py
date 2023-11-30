@@ -21,8 +21,16 @@ load_dotenv()
 This module contains the aclient class which is a subclass of discord.Client.
 It handles the interaction with the Discord API and the OpenAI API.
 """
+class ConversationManager:
+    def __init__(self):
+        self.conversation_history = []
 
+    def add_message(self, message):
+        self.conversation_history.append(message)
 
+    def get_history(self):
+        return self.conversation_history
+    
 class aclient(discord.Client):
     """
     This class is a subclass of discord.Client and handles the interaction with the Discord API and the OpenAI API.
@@ -37,6 +45,7 @@ class aclient(discord.Client):
         intents = discord.Intents.default()
         intents.message_content = True
         super().__init__(intents=intents)
+        self.conversation_manager = ConversationManager()
 
         self.tree = app_commands.CommandTree(self)
         self.current_channel = None
@@ -234,22 +243,12 @@ class aclient(discord.Client):
                 yield dd.content
         
     async def process_messages(self):
-        """
-        Processes incoming messages and sends them to the chatbot model for a response.
-        """
         while True:
-            if self.current_channel is not None:
-                while not self.message_queue.empty():
-                    await self.current_channel.typing()
-                    message, user_message = await self.message_queue.get()
-                    try:
-                        await self.send_message(message, user_message)
-                    except Exception as e:
-                        logger.exception(
-                            f"Error while processing message: {e}")
-                    finally:
-                        self.message_queue.task_done()
-            await asyncio.sleep(1)
+            # This will block until a message is available
+            message, user_message = await self.message_queue.get()
+            await self.send_message(message, user_message)
+            # Mark the task as done
+            self.message_queue.task_done()
 
     async def enqueue_message(self, message: discord.Message, user_message):
         """

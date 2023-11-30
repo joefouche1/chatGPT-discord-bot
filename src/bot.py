@@ -4,6 +4,9 @@ import random
 import asyncio
 import discord
 from discord import Embed
+import aiohttp
+import io
+from io import BytesIO
 
 import requests_cache
 
@@ -148,10 +151,21 @@ gpt-engine: {chat_engine_status}
         await interaction.response.defer(thinking=True, ephemeral=False)
         try:
             image_url = await client.draw(prompt)
-            # Create an Embed object that includes the image and some text
+            
+            # Download the image
+            async with aiohttp.ClientSession() as session:
+                async with session.get(image_url) as resp:
+                    image_data = await resp.read()
+
+            # Create a discord.File object
+            image_file = discord.File(io.BytesIO(image_data), filename="image.png")
+
+            # Create an Embed object that includes the image
             embed = Embed(description=prompt, title="AI hog generated image")
-            embed.set_image(url=image_url)
-            await interaction.followup.send("Here you go!", embed=embed)
+            embed.set_image(url="attachment://image.png")
+
+            # Send the embed and the image as an attachment
+            await interaction.followup.send("Here you go!", embed=embed, file=image_file)
 
         except Exception as e:
             if 'content_policy_violation' in str(e):
