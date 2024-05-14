@@ -167,7 +167,7 @@ class aclient(discord.Client):
 
         # Initialize the chat models with the conversation history
         completion = await self.client.chat.completions.create(
-            model="gpt-4-vision-preview",
+            model="gpt-4-turbo",
             messages=newhist,
             temperature=self.temperature,
             max_tokens=2000
