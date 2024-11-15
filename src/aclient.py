@@ -1,8 +1,10 @@
 import os
 import discord
 import asyncio
+import aiohttp
+import io
 
-from src.log import logger
+from utils.log import logger
 
 from utils.message_utils import send_split_message
 
@@ -14,6 +16,10 @@ from openai import AsyncOpenAI
 
 
 import tiktoken
+
+from aiohttp import ClientSession
+from discord.ext import commands
+from discord import Embed
 
 load_dotenv()
 
@@ -40,14 +46,15 @@ class aclient(discord.Client):
     It initializes the chatbot model and processes incoming messages.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, **kwargs) -> None:
         """
         Initializes the aclient class with default intents, command tree, activity, and environment variables.
         It also reads the system prompt from a file and initializes the chatbot model.
         """
         intents = discord.Intents.default()
         intents.message_content = True
-        super().__init__(intents=intents)
+        #intents.members = True
+        super().__init__(intents=intents, **kwargs)
         self.conversation_manager = ConversationManager()
 
         self.tree = app_commands.CommandTree(self)
@@ -83,6 +90,8 @@ class aclient(discord.Client):
         self.history_lock = asyncio.Lock()
         self.init_history()
         self.message_queue = asyncio.Queue()
+
+        self.rate_limiter = commands.CooldownMapping.from_cooldown(1, 5.0, commands.BucketType.user)
 
     def init_history(self):
         """
@@ -124,16 +133,88 @@ class aclient(discord.Client):
                             logger.info(f"Response is up to {len(response)}")
                             spoke2 = True
                 except StopAsyncIteration:
-                    # This exception is raised when the async generator is exhausted
                     break
         except asyncio.TimeoutError:
             logger.warning(
                 "handle_response took over 40 seconds with no reply.")
+
         # Add the model's response to the conversation history
         self.conversation_history.append({
             "role": "assistant",
             "content": response
         })
+
+        # Check for action codes in the response before returning
+        from src.bot import process_action_code
+        from src.commands.weather import get_weather
+        from src.commands.news import get_news
+        from src.commands.sports import get_sports_score
+        
+        try:
+            action_result = await process_action_code(response)
+            if action_result:
+                code, params = action_result
+                #logger.info(f"Found action code {code} with params {params}")
+                
+                # Execute the action and get any additional response
+                if code == "!WEATHER":
+                    await get_weather(self.current_channel, params)
+                    return None
+                elif code == "!SPORTS":
+                    try:
+                        result = await get_sports_score(params, self.client)
+                        if result:
+                            from src.commands.sports import format_sports_response
+                            embed = await format_sports_response(result)
+                            await self.current_channel.send(embed=embed)
+                        return None
+                    except Exception as e:
+                        await self.current_channel.send(f"Sorry, I couldn't find that score. Error: {str(e)}")
+                        return None
+                elif code == "!NEWS":
+                    await get_news(self.current_channel, params)
+                    return None
+                elif code == "!DRAW":
+                    try:
+                        image_url = await self.draw(params)
+                        
+                        # Download the image
+                        async with aiohttp.ClientSession() as session:
+                            async with session.get(image_url) as resp:
+                                image_data = await resp.read()
+
+                        # Create a discord.File object
+                        image_file = discord.File(io.BytesIO(
+                            image_data), filename="image.png")
+
+                        # Create an Embed object that includes the image
+                        embed = discord.Embed(description=params, title="AI hog generated image")
+                        embed.set_image(url="attachment://image.png")
+
+                        # Send the embed and the image as an attachment
+                        await self.current_channel.send("Here you go!", embed=embed, file=image_file)
+                        return None
+                    except Exception as e:
+                        error_msg = str(e)
+                        if 'content_policy_violation' in error_msg:
+                            embed = discord.Embed(
+                                title="🚫 Oink Oink! Content Policy Violation",
+                                description=f"Your prompt: `{params}`",
+                                color=discord.Color.red()
+                            )
+                            embed.add_field(
+                                name="Description",
+                                value="The AI pig has detected some questionable content! Let's keep things family-friendly.",
+                                inline=False
+                            )
+                            await self.current_channel.send(embed=embed)
+                        else:
+                            await self.current_channel.send(f'> **Something Went Wrong: {e}**')
+                        return None
+                
+        except Exception as e:
+            logger.error(f"Error processing action code in model response: {e}")
+
         return response
 
     async def handle_image_attachment(self, message: discord.Message, user_message: str) -> str:
@@ -215,11 +296,11 @@ class aclient(discord.Client):
         engine = self.openAI_gpt_engine
         if message:
             # Check if the current message contains the tag *GPT4*
-            if "*GPT4*" in message:
-                engine = 'gpt-4'
-                # Remove the gpt4 hint from the content
-                logger.info("Using GPT4 for current activity")
-                message = message.replace("*GPT4*", "")
+            # if "*GPT4*" in message:
+            #     engine = 'gpt-4'
+            #     # Remove the gpt4 hint from the content
+            #     logger.info("Using GPT4 for current activity")
+            #     message = message.replace("*GPT4*", "")
 
             # Acquire the lock before modifying the conversation_history
             async with self.history_lock:
@@ -280,19 +361,21 @@ class aclient(discord.Client):
             else:
                 normal_reply = ("witty reaction" not in user_message)
                 if normal_reply:
-                    response = (
-                        f'> **{user_message}** - <@{str(author)}> \n\n')
+                    response_prefix = f'> **{user_message}** - <@{str(author)}> \n\n'
                 else:
-                    response = ""
+                    response_prefix = ""
 
                 model_out = await self.handle_response(user_message)
-                response = f"{response}{model_out}"
-                logger.info(f"Response complete [size {len(model_out)}]")
+                
+                # Only send a message if model_out is not None
+                if model_out is not None:
+                    response = f"{response_prefix}{model_out}"
+                    logger.info(f"Response complete [size {len(model_out)}]")
 
-                if normal_reply:
-                    await send_split_message(self, response, message)
-                else:
-                    await message.reply(model_out, mention_author=False)
+                    if normal_reply:
+                        await send_split_message(self, response, message)
+                    else:
+                        await message.reply(model_out, mention_author=False)
 
         except Exception as e:
             logger.exception(f"Error while sending : {e}")
@@ -362,3 +445,11 @@ class aclient(discord.Client):
         })
 
         return response
+
+    async def on_command(self, ctx):
+        bucket = self.rate_limiter.get_bucket(ctx.message)
+        retry_after = bucket.update_rate_limit()
+        if retry_after:
+            await ctx.send(f"You're doing that too much. Try again in {retry_after:.2f}s.")
+            return True
+        return False

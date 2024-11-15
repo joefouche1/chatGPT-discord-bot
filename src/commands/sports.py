@@ -1,9 +1,11 @@
 import os
 import json
+import aiohttp
 import requests_cache
 from datetime import datetime, timedelta
 from src.aclient import aclient
-from src.log import logger
+from utils.log import logger
+import discord
 
 session = requests_cache.CachedSession('hogcache2', expire_after=360)
 
@@ -121,6 +123,27 @@ def clean_espn_response(scores_json):
     
     return cleaned
 
+async def format_sports_response(result: str, user_name: str = None, query: str = None) -> discord.Embed:
+    """Format sports response into a consistent embed style."""
+    # Extract heading if provided with ## prefix, otherwise leave empty
+    short_heading = ""
+    if result.split('\n')[0].startswith('##'):
+        short_heading = result.split('\n')[0].lstrip('#').strip()
+        # Remove heading from result
+        result = '\n'.join(result.split('\n')[1:])
+    
+    # Create an embed for the response
+    embed = discord.Embed(
+        title=f"🏆 Megapig Score Update - {short_heading}",
+        description=result,
+        color=discord.Color.green()
+    )
+    
+    if user_name and query:
+        embed.set_footer(text=f"Requested by {user_name} (query: {query})")
+    
+    return embed
+
 async def get_sports_score(query: str, client=None) -> str:
     """Get sports scores from the query."""
     try:
@@ -152,7 +175,9 @@ async def get_sports_score(query: str, client=None) -> str:
 
                 You are providing the family some sports updates. This data was extracted to satisfy a query .
                 The exact query was: "{query}".
-                Format the game scores and/or schedules most consistent with the query into a witty response.
+                Format the game scores and/or schedules most consistent with the query into a witty response using markdown.
+                At the beginning of your response, include a short heading like this:
+                ## Michigan 32, Ohio State 27
 
                 If you find URLs for game details, add them as links where appropriate.
                 If the game is upcoming, that is not a problem. Convert the game time to US Eastern if you can.
@@ -165,8 +190,7 @@ async def get_sports_score(query: str, client=None) -> str:
             model="gpt-4o",
             messages=messages
         )
-        response = completion.choices[0].message.content
-        return response
+        return completion.choices[0].message.content
         
     except Exception as e:
         logger.error(f"Failed to get sports score: {e}")

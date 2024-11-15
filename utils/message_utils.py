@@ -1,36 +1,22 @@
 from discord import Message
 
 
-async def send_split_message(self, response: str, message: Message, has_followed_up=False):
-    char_limit = 1900
-    if len(response) > char_limit:
-        is_code_block = False
-        parts = response.split("```")
-
-        for i in range(len(parts)):
-            if is_code_block:
-                code_block_chunks = [parts[i][j:j + char_limit] for j in range(0, len(parts[i]), char_limit)]
-                for chunk in code_block_chunks:
-                    if self.is_replying_all == "True" or has_followed_up:
-                        await message.channel.send(f"```{chunk}```")
-                    else:
-                        await message.followup.send(f"```{chunk}```")
-                        has_followed_up = True
-                is_code_block = False
-            else:
-                non_code_chunks = [parts[i][j:j + char_limit] for j in range(0, len(parts[i]), char_limit)]
-                for chunk in non_code_chunks:
-                    if self.is_replying_all == "True" or has_followed_up:
-                        await message.channel.send(chunk)
-                    else:
-                        await message.followup.send(chunk)
-                        has_followed_up = True
-                is_code_block = True
-    else:
-        if self.is_replying_all == "True" or has_followed_up:
-            await message.channel.send(response)
-        else:
+async def send_split_message(client, response: str, message):
+    """Send a message, splitting it if necessary to fit Discord's length limits."""
+    if len(response) <= 2000:
+        # Check if this is an interaction or regular message
+        if hasattr(message, 'followup'):
             await message.followup.send(response)
-            has_followed_up = True
+        else:
+            await message.channel.send(response)
+        return
 
-    return has_followed_up
+    # Split into chunks of 2000 characters
+    chunks = [response[i:i + 2000] for i in range(0, len(response), 2000)]
+    
+    # Send each chunk
+    for chunk in chunks:
+        if hasattr(message, 'followup'):
+            await message.followup.send(chunk)
+        else:
+            await message.channel.send(chunk)

@@ -8,12 +8,15 @@ import aiohttp
 import io
 from datetime import datetime, timedelta
 import json
+from typing import Optional, Tuple
 
 import requests_cache
 
-from src.log import logger
+from utils.log import logger
 from src.aclient import aclient
-from src.sports import get_sports_score  # We'll create this file next
+from src.commands.weather import get_weather
+from src.commands.news import get_news
+from src.commands.sports import get_sports_score, format_sports_response  # Assuming you've already moved this
 
 
 # Create a cached session for requests
@@ -22,6 +25,73 @@ session = requests_cache.CachedSession('hogcache', expire_after=360)
 # Instantiate the main client object
 client = aclient()
 
+# Add after other constants
+ACTION_CODES = {
+    "!SPORTS": "sports",
+    "!WEATHER": "weather",
+    "!NEWS": "news",
+    "!DRAW": "draw"
+}
+
+async def process_action_code(message: str) -> Optional[Tuple[str, str]]:
+    """Check if message contains an action code and extract parameters."""
+    for code in ACTION_CODES:
+        # Use find instead of startswith to catch action codes anywhere in the message
+        index = message.find(code)
+        if index != -1:
+            # Extract everything after the action code
+            params = message[index + len(code):].strip()
+            logger.info(f"Action code detected: {code} with params: {params}")
+            return (code, params)
+    return None
+
+# Move get_weather outside of run_discord_bot
+async def get_weather(channel, city: str):
+    """Get weather information for a city."""
+    base_url = "http://api.openweathermap.org/data/2.5/weather?"
+    api_key = os.getenv('WEATHER_API_KEY')
+    complete_url = base_url + "appid=" + api_key + "&q=" + city
+    
+    try:
+        response = session.get(complete_url)
+        x = response.json()
+
+        if x["cod"] != "404":
+            y = x["main"]
+            current_temperature = y["temp"]
+            current_temperature_fahrenheit = str(
+                round((current_temperature - 273.15) * 9 / 5 + 32))
+            current_pressure = y["pressure"]
+            current_pressure_mmHg = str(round(current_pressure * 0.750062))
+            current_humidity = y["humidity"]
+            z = x["weather"]
+            weather_description = z[0]["description"]
+            
+            embed = discord.Embed(
+                title=f"Weather in {city}",
+                color=discord.Color.blue(),
+                timestamp=datetime.now()
+            )
+            embed.add_field(name="Description",
+                            value=f"**{weather_description}**", inline=False)
+            embed.add_field(
+                name="Temperature(F)", value=f"**{current_temperature_fahrenheit}°F**", inline=False)
+            embed.add_field(name="Humidity(%)",
+                            value=f"**{current_humidity}%**", inline=False)
+            embed.add_field(name="Atmospheric Pressure(mmHg)",
+                            value=f"**{current_pressure_mmHg}mmHg**", inline=False)
+            
+            icon = z[0]["icon"]
+            embed.set_thumbnail(
+                url=f"https://openweathermap.org/img/w/{icon}.png")
+            
+            await channel.send(embed=embed)
+        else:
+            await channel.send("City not found. Try format: Pittsburgh OR Pittsburgh,PA,US OR London,UK")
+            
+    except Exception as e:
+        logger.error(f"Error getting weather: {e}")
+        await channel.send("Error getting weather information. Please try again later.")
 
 # Function to run the discord bot
 def run_discord_bot():
@@ -114,47 +184,6 @@ gpt-engine: {chat_engine_status}
                 await interaction.response.send_message("Data incomplete.")
         else:
             await interaction.response.send_message("No articles found.")
-
-    @client.tree.command(name='weather', description='Weather')
-    async def weather(ctx, *, city: str):
-        """Command to get the weather of a city."""
-        city_name = city
-        base_url = "http://api.openweathermap.org/data/2.5/weather?"
-        api_key = os.getenv('WEATHER_API_KEY')
-        complete_url = base_url + "appid=" + api_key + "&q=" + city_name
-        response = session.get(complete_url)
-        # logger.info(f"weather {complete_url}")
-        x = response.json()
-
-        if x["cod"] != "404":
-            y = x["main"]
-            current_temperature = y["temp"]
-            current_temperature_fahrenheit = str(
-                round((current_temperature - 273.15) * 9 / 5 + 32))
-            current_pressure = y["pressure"]
-            # Convert pressure from hPa to mmHg
-            current_pressure_mmHg = str(round(current_pressure * 0.750062))
-            current_humidity = y["humidity"]
-            z = x["weather"]
-            weather_description = z[0]["description"]
-            embed = discord.Embed(
-                title=f"Weather in {city_name}", color=ctx.guild.me.top_role.color, timestamp=ctx.created_at)
-            embed.add_field(name="Description",
-                            value=f"**{weather_description}**", inline=False)
-            embed.add_field(
-                name="Temperature(F)", value=f"**{current_temperature_fahrenheit}°F**", inline=False)
-            embed.add_field(name="Humidity(%)",
-                            value=f"**{current_humidity}%**", inline=False)
-            embed.add_field(name="Atmospheric Pressure(mmHg)",
-                            value=f"**{current_pressure_mmHg}mmHg**", inline=False)
-            icon = z[0]["icon"]
-            embed.set_thumbnail(
-                url=f"https://openweathermap.org/img/w/{icon}.png")
-            embed.set_footer(text=f"Requested by {ctx.user.name}")
-            await ctx.response.send_message(embed=embed)
-        else:
-            await ctx.response.send_message("City not found. Type as follows: Pittsburgh "
-                                            "OR Pittsburgh,PA,US OR London,UK")
 
     @client.tree.command(name="draw", description="Generate an image with the Dall-e-3 model")
     async def draw(interaction: discord.Interaction, *, prompt: str):
@@ -307,22 +336,12 @@ gpt-engine: {chat_engine_status}
 
         try:
             result = await get_sports_score(query, client.client)
-            
-            # Create an embed for the response
-            embed = discord.Embed(
-                title="🏆 Megapig Score Update",
-                description=result,
-                color=discord.Color.green()
+            embed = await format_sports_response(
+                result, 
+                user_name=interaction.user.name, 
+                query=query
             )
-            embed.set_footer(text=f"Requested by {interaction.user.name} (query: {query})")
-            
-            # Send the embed
-            score_message = await interaction.followup.send(embed=embed)
-            
-            # # Send a separate message to trigger the reaction
-            # if isinstance(score_message.channel, discord.TextChannel):  # Make sure we're in a text channel
-            #     user_message = f"Give a short, witty reaction to this sports update: {result}"
-            #     await client.enqueue_message(score_message, user_message)
+            await interaction.followup.send(embed=embed)
             
         except Exception as e:
             logger.error(f"Error getting sports score: {e}")
@@ -330,60 +349,51 @@ gpt-engine: {chat_engine_status}
 
     @client.event
     async def on_message(message):
-        """Event handler for when a message is received."""
-        in_channels = (
-            message.channel.id in client.replying_all_discord_channel_ids)
+        # Add debug logging for mentions
+        if client.user.mentioned_in(message):
+            logger.info(f"Bot was mentioned in message: {message.content}")
+            logger.info(f"Message author: {message.author}, Channel: {message.channel}")
+        
+        # Check if message is from bot
+        is_author_not_bot = message.author != client.user
+        if not is_author_not_bot:
+            return
+        
+        # Check if this is a valid channel/DM
+        in_channels = message.channel.id in client.replying_all_discord_channel_ids
         is_dm = isinstance(message.channel, discord.DMChannel)
-
-        username = str(message.author)
-        user_message = str(message.content)
-        writer = str(message.author.name)
-
-        if (message.author != client.user) and (in_channels or is_dm):
+        is_mentioned = client.user.mentioned_in(message)
+        
+        # Debug log for decision factors
+        # logger.info(f"Message check - in_channels: {in_channels}, is_dm: {is_dm}, is_mentioned: {is_mentioned}")
+        
+        # Respond if in allowed channel, DM, or mentioned
+        should_reply = in_channels or is_dm or is_mentioned
+        
+        if should_reply:
             client.current_channel = message.channel
             regex = os.getenv("MESSAGE_REGEX")
             try:
-                if re.match(regex, user_message.lower()) or client.user.mentioned_in(message) or is_dm:
-                    # ACTIVATE THE PIG
-                    # is it better to strip the hog honorifics?
-                    # if ',' in user_message:
-                    #    user_message = user_message.split(',', 1)[1].strip()
-                    logger.info(
-                        f"\x1b[31m{username}\x1b[0m : '{user_message}' ({client.current_channel})")
+                # Remove the mention from the message if present
+                user_message = str(message.content)
+                if is_mentioned:
+                    user_message = re.sub(f'<@!?{client.user.id}>', '', user_message).strip()
+                    logger.info(f"After mention removal: '{user_message}'")
+                
+                # If no action code found, proceed with normal message handling
+                if is_mentioned or re.match(regex, user_message.lower()) or is_dm:
+                    logger.info(f"\x1b[31m{message.author}\x1b[0m : '{user_message}' ({message.channel})")
                     await client.enqueue_message(message, user_message)
-
-                    if random.random() < 0.25:
-                        if "Howler" in writer:
-                            await message.add_reaction("🐷")
-                        elif "Joe" in writer:
-                            await message.add_reaction("🧠")
             except re.error:
                 logger.error(f"Invalid regex: {regex}")
 
-        if (message.author == client.user) and message.embeds:
-            ezero = message.embeds[0]
-            logger.info(f"Found something we said with embeds: {ezero.fields}")
-            react_to = None
-            
-            # First check for Description field
-            for field in ezero.fields:
-                if field.name == 'Description':
-                    react_to = f"{ezero.title}: {field.value}"
-                    logger.info(f"Found summary for {ezero.title} posting")
-                    break
-            
-            # If no Description field found, use the embed's description if available
-            if not react_to and ezero.description:
-                react_to = f"{ezero.title}: {ezero.description}"
-                logger.info(f"Using embed description for {ezero.title}")
-            
-            if react_to:
-                user_message = f"Give a short, witty reaction to this headline: {react_to}"
-                logger.info(
-                    f"\x1b[31m{username}\x1b[0m : '{user_message}' ({client.current_channel})")
-                await client.enqueue_message(message, user_message)
-
-  
+    @client.tree.command(name="testmention", description="Test mention handling")
+    async def testmention(interaction: discord.Interaction):
+        """Test the bot's mention handling."""
+        await interaction.response.send_message(
+            f"My ID is {client.user.id}\n"
+            f"Mention me like this: <@{client.user.id}>"
+        )
 
     TOKEN = os.getenv("DISCORD_BOT_TOKEN")
     client.run(TOKEN)
