@@ -6,12 +6,14 @@ import discord
 from discord import Embed
 import aiohttp
 import io
-
+from datetime import datetime, timedelta
+import json
 
 import requests_cache
 
 from src.log import logger
 from src.aclient import aclient
+from src.sports import get_sports_score  # We'll create this file next
 
 
 # Create a cached session for requests
@@ -27,8 +29,8 @@ def run_discord_bot():
     async def on_ready():
         """Event handler for when the bot is ready."""
         client.is_replying_all = os.getenv("REPLYING_ALL", "False")
-        await client.send_start_prompt()
         await client.tree.sync()
+        await client.send_start_prompt()
         loop = asyncio.get_event_loop()
         loop.create_task(client.process_messages())
         logger.info(
@@ -185,11 +187,20 @@ gpt-engine: {chat_engine_status}
             await interaction.followup.send("Here you go!", embed=embed, file=image_file)
 
         except Exception as e:
-            if 'content_policy_violation' in str(e):
-                # Send a funny admonishment to the user
-                await interaction.response.send_message(
-                    f'> **Oops! Your prompt [{prompt}] seems to have violated '
-                    'the OpenAI content policy. Let\'s keep it clean and fun, shall we?**')
+            error_msg = str(e)
+            if 'content_policy_violation' in error_msg:
+                # Create a funny embed for the violation
+                embed = discord.Embed(
+                    title="🚫 Oink Oink! Content Policy Violation",
+                    description=f"Your prompt: `{prompt}`",
+                    color=discord.Color.red()
+                )
+                embed.add_field(
+                    name="Description",
+                    value="The AI pig has detected some questionable content! Let's keep things family-friendly.",
+                    inline=False
+                )
+                await interaction.followup.send(embed=embed)
             else:
                 await interaction.followup.send(f'> **Something Went Wrong: {e}**')
 
@@ -222,6 +233,100 @@ gpt-engine: {chat_engine_status}
         ]
         response = random.choice(responses)
         await interaction.response.send_message(f"Question: {question}\nAnswer: {response}")
+
+    @client.tree.command(name="sportsnews", description="Get a funny summary of sports headlines")
+    async def sportsnews(interaction: discord.Interaction, sport: str):
+        """Command to get a funny summary of sports headlines for a specific sport."""
+        # Map of supported sports to their ESPN API endpoints
+        sport_endpoints = {
+            "nfl": "football/nfl",
+            "nba": "basketball/nba",
+            "mlb": "baseball/mlb",
+            "nhl": "hockey/nhl",
+            "soccer": "soccer/eng.1",  # Using EPL as default soccer league
+            "ncaaf": "football/college-football",
+            "ncaab": "basketball/mens-college-basketball",
+        }
+
+        if sport.lower() not in sport_endpoints:
+            await interaction.response.send_message(
+                f"Sport not supported. Available options: {', '.join(sport_endpoints.keys())}")
+            return
+
+        await interaction.response.defer(thinking=True)
+        
+        url = f"http://site.api.espn.com/apis/site/v2/sports/{sport_endpoints[sport.lower()]}/news"
+        
+        try:
+            response = session.get(url)
+            data = response.json()
+            
+            if not data.get("articles"):
+                await interaction.followup.send("No news articles found.")
+                return
+
+            # Ask the LLM for a funny summary
+            prompt = (
+                "Here are some recent sports headlines. Please provide a brief, "
+                "humorous summary of 2-3 of the most interesting stories in a casual, "
+                "entertaining way. Keep it light and fun!\n\n"
+            )
+            
+            # Add the first 5 headlines to the prompt
+            for article in data["articles"][:5]:
+                prompt += f"- {article['headline']}\n"
+                if article.get('description'):
+                    prompt += f"  {article['description']}\n"
+
+            summary = await client.get_chat_response(prompt)
+            
+            # Create and send embed
+            embed = discord.Embed(
+                title=f"🎯 Latest {sport.upper()} News Rundown",
+                description=summary,
+                color=discord.Color.blue()
+            )
+            
+            # Add link to first article
+            if data["articles"]:
+                embed.add_field(
+                    name="Read More",
+                    value=f"[Full Story]({data['articles'][0]['links']['web']['href']})",
+                    inline=False
+                )
+
+            await interaction.followup.send(embed=embed)
+
+        except Exception as e:
+            logger.error(f"Error fetching sports news: {e}")
+            await interaction.followup.send("Error fetching sports news. Please try again later.")
+
+    @client.tree.command(name="sportsscore", description="Get sports scores")
+    async def sportsscore(interaction: discord.Interaction, query: str):
+        await interaction.response.defer()  # Defer first since this might take a while
+
+        try:
+            result = await get_sports_score(query, client.client)
+            
+            # Create an embed for the response
+            embed = discord.Embed(
+                title="🏆 Megapig Score Update",
+                description=result,
+                color=discord.Color.green()
+            )
+            embed.set_footer(text=f"Requested by {interaction.user.name} (query: {query})")
+            
+            # Send the embed
+            score_message = await interaction.followup.send(embed=embed)
+            
+            # # Send a separate message to trigger the reaction
+            # if isinstance(score_message.channel, discord.TextChannel):  # Make sure we're in a text channel
+            #     user_message = f"Give a short, witty reaction to this sports update: {result}"
+            #     await client.enqueue_message(score_message, user_message)
+            
+        except Exception as e:
+            logger.error(f"Error getting sports score: {e}")
+            await interaction.followup.send(f"Sorry, I couldn't find that score. Error: {str(e)}")
 
     @client.event
     async def on_message(message):
@@ -259,16 +364,26 @@ gpt-engine: {chat_engine_status}
             ezero = message.embeds[0]
             logger.info(f"Found something we said with embeds: {ezero.fields}")
             react_to = None
+            
+            # First check for Description field
             for field in ezero.fields:
-                # logger.info(f"Field name: {field.name}, Field value: {field.value}")
                 if field.name == 'Description':
-                    react_to = ezero.title + ": " + field.value
+                    react_to = f"{ezero.title}: {field.value}"
                     logger.info(f"Found summary for {ezero.title} posting")
+                    break
+            
+            # If no Description field found, use the embed's description if available
+            if not react_to and ezero.description:
+                react_to = f"{ezero.title}: {ezero.description}"
+                logger.info(f"Using embed description for {ezero.title}")
+            
             if react_to:
                 user_message = f"Give a short, witty reaction to this headline: {react_to}"
                 logger.info(
                     f"\x1b[31m{username}\x1b[0m : '{user_message}' ({client.current_channel})")
                 await client.enqueue_message(message, user_message)
+
+  
 
     TOKEN = os.getenv("DISCORD_BOT_TOKEN")
     client.run(TOKEN)

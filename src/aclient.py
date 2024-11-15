@@ -167,7 +167,7 @@ class aclient(discord.Client):
 
         # Initialize the chat models with the conversation history
         completion = await self.client.chat.completions.create(
-            model="gpt-4-turbo",
+            model="gpt-4o-mini",
             messages=newhist,
             temperature=self.temperature,
             max_tokens=2000
@@ -255,11 +255,13 @@ class aclient(discord.Client):
             # Mark the task as done
             self.message_queue.task_done()
 
-    async def enqueue_message(self, message: discord.Message, user_message):
+    async def enqueue_message(self, message, user_message):
         """
-        Adds a message to the message queue for processing.
+        Add a message to the processing queue
         """
-        await message.response.defer(ephemeral=self.isPrivate) if self.is_replying_all == "False" else None
+        if hasattr(message, 'response'):  # This is an Interaction
+            await message.response.defer(ephemeral=self.isPrivate) if self.is_replying_all == "False" else None
+        
         await self.message_queue.put((message, user_message))
 
     async def send_message(self, message: discord.Message, user_message):
@@ -330,3 +332,33 @@ class aclient(discord.Client):
                 logger.info("Not given starting prompt. Skipping...")
         except Exception as e:
             logger.exception(f"Error while sending system prompt: {e}")
+
+    async def get_chat_response(self, message: str) -> str:
+        """
+        Gets a simple chat response without streaming.
+        """
+        # Add the user's message to conversation history
+        self.conversation_history.append({
+            "role": "user",
+            "content": message
+        })
+
+        await self.__truncate_conversation()
+
+        # Get completion from OpenAI
+        completion = await self.client.chat.completions.create(
+            model=self.openAI_gpt_engine,
+            messages=self.conversation_history,
+            temperature=self.temperature,
+            max_tokens=1000
+        )
+
+        response = completion.choices[0].message.content
+
+        # Add the response to conversation history
+        self.conversation_history.append({
+            "role": "assistant",
+            "content": response
+        })
+
+        return response
