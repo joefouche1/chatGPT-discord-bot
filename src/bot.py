@@ -17,33 +17,17 @@ from src.aclient import aclient
 from src.commands.weather import get_weather
 from src.commands.news import get_news
 from src.commands.sports import get_sports_score, format_sports_response  # Assuming you've already moved this
+from src.commands.actions import ACTION_CODES, process_action_code
 
+import sys
+import fcntl
+from pathlib import Path
 
 # Create a cached session for requests
 session = requests_cache.CachedSession('hogcache', expire_after=360)
 
 # Instantiate the main client object
 client = aclient()
-
-# Add after other constants
-ACTION_CODES = {
-    "!SPORTS": "sports",
-    "!WEATHER": "weather",
-    "!NEWS": "news",
-    "!DRAW": "draw"
-}
-
-async def process_action_code(message: str) -> Optional[Tuple[str, str]]:
-    """Check if message contains an action code and extract parameters."""
-    for code in ACTION_CODES:
-        # Use find instead of startswith to catch action codes anywhere in the message
-        index = message.find(code)
-        if index != -1:
-            # Extract everything after the action code
-            params = message[index + len(code):].strip()
-            logger.info(f"Action code detected: {code} with params: {params}")
-            return (code, params)
-    return None
 
 # Move get_weather outside of run_discord_bot
 async def get_weather(channel, city: str):
@@ -95,6 +79,24 @@ async def get_weather(channel, city: str):
 
 # Function to run the discord bot
 def run_discord_bot():
+    # Create a lock file in /tmp
+    lock_file = Path("/tmp/discord_bot.lock")
+    
+    try:
+        # Try to create and lock the file
+        lock_handle = open(lock_file, 'w')
+        fcntl.lockf(lock_handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        
+        # Write the PID to the lock file
+        lock_handle.write(str(os.getpid()))
+        lock_handle.flush()
+        
+        logger.info("Bot instance lock acquired")
+        
+    except IOError:
+        logger.error("Another instance of the bot is already running")
+        sys.exit(1)
+        
     @client.event
     async def on_ready():
         """Event handler for when the bot is ready."""
@@ -347,45 +349,88 @@ gpt-engine: {chat_engine_status}
             logger.error(f"Error getting sports score: {e}")
             await interaction.followup.send(f"Sorry, I couldn't find that score. Error: {str(e)}")
 
+    @client.tree.command(name="sportsnow", description="Get live sports scores")
+    async def sportsnow(interaction: discord.Interaction, query: str):
+        await interaction.response.defer()  # Defer first since this might take a while
+
+        try:
+            result = await get_sports_score(query, client.client, live=True)  # Note the live=True parameter
+            embed = await format_sports_response(
+                result, 
+                user_name=interaction.user.name, 
+                query=query
+            )
+            await interaction.followup.send(embed=embed)
+            
+        except Exception as e:
+            logger.error(f"Error getting live sports score: {e}")
+            await interaction.followup.send(f"Sorry, I couldn't find that live score. Error: {str(e)}")
+
     @client.event
     async def on_message(message):
-        # Add debug logging for mentions
-        if client.user.mentioned_in(message):
-            logger.info(f"Bot was mentioned in message: {message.content}")
-            logger.info(f"Message author: {message.author}, Channel: {message.channel}")
-        
-        # Check if message is from bot
-        is_author_not_bot = message.author != client.user
-        if not is_author_not_bot:
+        # Ignore our own messages
+        if message.author == client.user:
             return
         
-        # Check if this is a valid channel/DM
+        # Get bot's roles in this specific guild
+        bot_member = message.guild.get_member(client.user.id) if message.guild else None
+        bot_roles = bot_member.roles if bot_member else []
+        
+        # Multiple ways to check for mentions
+        is_mentioned = any([
+            client.user.mentioned_in(message),  # Standard mention check
+            f'<@{client.user.id}>' in message.content,  # Raw mention format
+            f'<@!{client.user.id}>' in message.content,  # Nickname mention format
+            message.reference and message.reference.resolved and message.reference.resolved.author == client.user,  # Reply to bot
+            any(role.id in [r.id for r in bot_roles] for role in message.role_mentions)  # Role mention check
+        ])
+        
+        # Log mention detection details for debugging
+        if any([client.user.mentioned_in(message), client.user.id in map(lambda x: x.id, message.mentions)]):
+            logger.info(f"Mention detected in message: {message.content}")
+            logger.info(f"Message mentions: {[m.id for m in message.mentions]}")
+            logger.info(f"Role mentions: {[r.id for r in message.role_mentions]}")
+            logger.info(f"Bot ID: {client.user.id}")
+            logger.info(f"Bot roles in this guild: {[r.id for r in bot_roles]}")
+        
+        # Check channel conditions
         in_channels = message.channel.id in client.replying_all_discord_channel_ids
         is_dm = isinstance(message.channel, discord.DMChannel)
-        is_mentioned = client.user.mentioned_in(message)
         
-        # Debug log for decision factors
-        # logger.info(f"Message check - in_channels: {in_channels}, is_dm: {is_dm}, is_mentioned: {is_mentioned}")
-        
-        # Respond if in allowed channel, DM, or mentioned
-        should_reply = in_channels or is_dm or is_mentioned
-        
-        if should_reply:
+        try:
+            # Remove the mention from the message if present
+            user_message = str(message.content)
+            if is_mentioned:
+                # Remove both <@ID> and <@!ID> mention formats
+                user_message = re.sub(f'<@!?{client.user.id}>', '', user_message).strip()
+                logger.info(f"After mention removal: '{user_message}'")
+            
+            # Set current channel for response handling
             client.current_channel = message.channel
-            regex = os.getenv("MESSAGE_REGEX")
-            try:
-                # Remove the mention from the message if present
-                user_message = str(message.content)
-                if is_mentioned:
-                    user_message = re.sub(f'<@!?{client.user.id}>', '', user_message).strip()
-                    logger.info(f"After mention removal: '{user_message}'")
-                
-                # If no action code found, proceed with normal message handling
-                if is_mentioned or re.match(regex, user_message.lower()) or is_dm:
-                    logger.info(f"\x1b[31m{message.author}\x1b[0m : '{user_message}' ({message.channel})")
-                    await client.enqueue_message(message, user_message)
-            except re.error:
-                logger.error(f"Invalid regex: {regex}")
+            
+            # Determine if we should respond based on three cases:
+            # 1. Direct mention in any channel
+            # 2. Message in allowed channel that matches regex
+            # 3. Direct message
+            should_respond = False
+            
+            if is_mentioned:
+                # Always respond to mentions
+                should_respond = True
+            elif is_dm:
+                # Always respond to DMs
+                should_respond = True
+            elif in_channels:
+                # In allowed channels, only respond if message matches regex
+                regex = os.getenv("MESSAGE_REGEX")
+                should_respond = re.match(regex, user_message.lower()) is not None
+            
+            if should_respond:
+                logger.info(f"\x1b[31m{message.author}\x1b[0m : '{user_message}' ({message.channel})")
+                await client.enqueue_message(message, user_message)
+            
+        except Exception as e:
+            logger.error(f"Error processing message: {e}")
 
     @client.tree.command(name="testmention", description="Test mention handling")
     async def testmention(interaction: discord.Interaction):
@@ -395,5 +440,15 @@ gpt-engine: {chat_engine_status}
             f"Mention me like this: <@{client.user.id}>"
         )
 
-    TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-    client.run(TOKEN)
+    try:
+        TOKEN = os.getenv("DISCORD_BOT_TOKEN")
+        client.run(TOKEN)
+    finally:
+        # Clean up the lock file when the bot exits
+        try:
+            fcntl.lockf(lock_handle, fcntl.LOCK_UN)
+            lock_handle.close()
+            lock_file.unlink()  # Delete the lock file
+            logger.info("Bot instance lock released")
+        except Exception as e:
+            logger.error(f"Error cleaning up lock file: {e}")

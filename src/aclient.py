@@ -21,6 +21,14 @@ from aiohttp import ClientSession
 from discord.ext import commands
 from discord import Embed
 
+
+# Check for action codes in the response before returning
+from src.commands.actions import process_action_code
+from src.commands.weather import get_weather
+from src.commands.news import get_news
+from src.commands.sports import get_sports_score
+        
+
 load_dotenv()
 
 """
@@ -144,12 +152,6 @@ class aclient(discord.Client):
             "content": response
         })
 
-        # Check for action codes in the response before returning
-        from src.bot import process_action_code
-        from src.commands.weather import get_weather
-        from src.commands.news import get_news
-        from src.commands.sports import get_sports_score
-        
         try:
             action_result = await process_action_code(response)
             if action_result:
