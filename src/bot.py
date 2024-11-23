@@ -18,6 +18,7 @@ from src.commands.weather import get_weather
 from src.commands.news import get_news
 from src.commands.sports import get_sports_score, format_sports_response  # Assuming you've already moved this
 from src.commands.actions import ACTION_CODES, process_action_code
+from src.commands.meme import Meme
 
 import sys
 import fcntl
@@ -441,6 +442,8 @@ gpt-engine: {chat_engine_status}
         )
 
     try:
+        client.tree.add_command(Meme(client))
+        
         TOKEN = os.getenv("DISCORD_BOT_TOKEN")
         client.run(TOKEN)
     finally:

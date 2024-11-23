@@ -24,7 +24,9 @@ RUN apt-get update && apt-get install -y \
   tcl-dev \
   libtiff5-dev \
   tk-dev \
-  zlib1g-dev
+  zlib1g-dev \
+  python3-pil \
+  fonts-impact
 
 RUN pip3 install cryptography
 COPY ./ /DiscordBot

@@ -6,8 +6,17 @@ from datetime import datetime, timedelta
 from utils.log import logger
 import discord
 import asyncio
+from aiohttp import ClientSession, ClientTimeout
 
-session = requests_cache.CachedSession('hogcache2', expire_after=360)
+# Create a shared aiohttp session with timeout
+timeout = ClientTimeout(total=10)  # 10 second timeout
+session = None
+
+async def get_session():
+    global session
+    if session is None:
+        session = ClientSession(timeout=timeout)
+    return session
 
 async def parse_sports_query(query: str, client):
     """Parse natural language query into structured data using LLM"""
@@ -17,11 +26,13 @@ async def parse_sports_query(query: str, client):
         {"role": "system", "content": f"""
         You are an expert sports assistant. The current date and time is: {current_time.strftime('%Y-%m-%d %H:%M:%S')}
         
-        Extract the following information from queries for sports scores:
         - Sport (baseball, basketball, football, etc.)
         - League (nba, wnba, ncaab, nfl, ncaaf, nhl, epl, mls etc.)
+
+        The user will propose various natural language queries about sports. Your job is to generate structured API parameters,
+        which will be used to fetch data from the ESPN API.
         
-        For football queries:
+        For American football queries:
         - If the team is an NFL team (Bengals, Steelers, Browns, Ravens, Bills, Patriots, etc.), set league to "nfl"
         - Only use "ncaaf" for explicit college football teams or when "college" is mentioned
         
@@ -78,7 +89,9 @@ async def parse_sports_query(query: str, client):
 def build_espn_request(parsed_query, live=False):
     """Build ESPN API request from parsed query"""
     if live:
-        # Use live score API for SPORTSNOW
+        # Use environment variable for API host
+        api_host = os.getenv('SPORTS_API_HOST', 'api.joefu.net')
+        
         LIVE_ENDPOINTS = {
             "nba" : "basketball_nba",
             "nfl" : "americanfootball_nfl",
@@ -88,8 +101,10 @@ def build_espn_request(parsed_query, live=False):
             "ncaab" : "basketball_ncaab",
             "ncaaf" : "americanfootball_ncaaf"
         }
+        
+        endpoint = LIVE_ENDPOINTS[parsed_query['league'].lower()]
         return {
-            "url": f"http://api.joefu.net/espn/{LIVE_ENDPOINTS[parsed_query['league'].lower()]}",
+            "url": f"https://{api_host}/espn/{endpoint}",
             "params": {}  # Live API doesn't need date params
         }
     
@@ -183,35 +198,35 @@ async def get_sports_score(query: str, client=None, live=False) -> str:
         if client is None:
             raise Exception("OpenAI client not provided")
         
-        # Check if query contains NOW or LIVE to override the live parameter
+        # Check if query contains NOW or LIVE
         if any(word in query.upper() for word in ["NOW", "LIVE"]):
             live = True
-            # Remove NOW/LIVE from query to not confuse the parser
             query = query.upper().replace("NOW", "").replace("LIVE", "").strip()
             
-        # Parse the natural language query
         parsed = await parse_sports_query(query, client)
         logger.info(f"Parsed {'live' if live else 'historical'} query: {parsed}")
         
         # Build and execute API request with retry
         request = build_espn_request(parsed, live=live)
         response = None
+        
+        # Get the aiohttp session
+        http_session = await get_session()
+        
         try:
             logger.info(f"{'Live' if live else 'Historical'} request: {request}")
-            response = session.get(request["url"], params=request["params"])
+            async with http_session.get(request["url"], params=request["params"]) as response:
+                rjson = await response.json()
         except Exception as e:
             logger.warning(f"First API attempt failed: {e}, retrying once...")
             try:
                 await asyncio.sleep(1)
-                response = session.get(request["url"], params=request["params"])
+                async with http_session.get(request["url"], params=request["params"]) as response:
+                    rjson = await response.json()
             except Exception as retry_e:
                 logger.error(f"Retry also failed: {retry_e}")
                 raise retry_e
         
-        if not response:
-            raise Exception("Failed to get response from API")
-            
-        rjson = response.json()
         if not live:
             scores = clean_espn_response(rjson) 
         else:
@@ -243,3 +258,9 @@ async def get_sports_score(query: str, client=None, live=False) -> str:
     except Exception as e:
         logger.error(f"Failed to get sports score: {e}")
         raise Exception(f"Failed to get sports score: {e}")
+
+async def cleanup():
+    global session
+    if session:
+        await session.close()
+        session = None

@@ -19,3 +19,4 @@ frozenlist>=1.4.0
 urllib3>=2.0.4
 certifi>=2024.8.30
 url_normalize>=1.0.0
+Pillow>=10.0.1
