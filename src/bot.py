@@ -9,6 +9,7 @@ import io
 from datetime import datetime, timedelta
 import json
 from typing import Optional, Tuple
+import time
 
 import requests_cache
 
@@ -29,6 +30,11 @@ session = requests_cache.CachedSession('hogcache', expire_after=360)
 
 # Instantiate the main client object
 client = aclient()
+
+# Track processed message IDs to prevent duplicate processing
+# Store message IDs with timestamps to auto-cleanup old entries
+processed_messages = {}
+MESSAGE_EXPIRY = 24 * 60 * 60  # 24 hours in seconds
 
 # Move get_weather outside of run_discord_bot
 async def get_weather(channel, city: str):
@@ -373,6 +379,18 @@ gpt-engine: {chat_engine_status}
         if message.author == client.user:
             return
         
+        # Check if we've already processed this message to prevent duplicates
+        current_time = time.time()
+        if message.id in processed_messages:
+            logger.info(f"Skipping already processed message ID: {message.id}")
+            return
+            
+        # Cleanup old processed messages to prevent memory leaks
+        expired_messages = [msg_id for msg_id, timestamp in processed_messages.items() 
+                          if current_time - timestamp > MESSAGE_EXPIRY]
+        for msg_id in expired_messages:
+            del processed_messages[msg_id]
+        
         # Get bot's roles in this specific guild
         bot_member = message.guild.get_member(client.user.id) if message.guild else None
         bot_roles = bot_member.roles if bot_member else []
@@ -428,6 +446,8 @@ gpt-engine: {chat_engine_status}
             
             if should_respond:
                 logger.info(f"\x1b[31m{message.author}\x1b[0m : '{user_message}' ({message.channel})")
+                # Mark this message as processed with current timestamp
+                processed_messages[message.id] = current_time
                 await client.enqueue_message(message, user_message)
             
         except Exception as e:

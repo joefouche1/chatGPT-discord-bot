@@ -3,6 +3,7 @@ import discord
 import asyncio
 import aiohttp
 import io
+import re
 
 from utils.log import logger
 
@@ -221,14 +222,13 @@ class aclient(discord.Client):
 
     async def handle_image_attachment(self, message: discord.Message, user_message: str) -> str:
         """
-            Attempt to deal with an attached picture as a special request
-
-            Discord urls can be resized.
+            Handle processing of image attachments using GPT-4o's vision capabilities
         """
         img_url = message.attachments[0].url + "?width=500&height=500"
 
         logger.info(f"Prompting with photo at {img_url}")
-        # Craft the prompt for GPT
+        
+        # Craft the prompt for GPT-4o
         prompt_message = [
             {
                 "role": "user",
@@ -248,9 +248,10 @@ class aclient(discord.Client):
         ]
         newhist = self.conversation_history + prompt_message
 
-        # Initialize the chat models with the conversation history
+        # Use GPT-4o for image understanding regardless of the general engine setting
+        # This ensures best image understanding capabilities
         completion = await self.client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-4o",  # Always use GPT-4o for image handling
             messages=newhist,
             temperature=self.temperature,
             max_tokens=2000
@@ -352,6 +353,8 @@ class aclient(discord.Client):
         Sends a message to the chatbot model and handles the response.
         """
         author = message.author.id
+        # Ensure we're explicitly using the message's channel rather than current_channel
+        response_channel = message.channel
         try:
             # Check if the message has any attachments
             if message.attachments:
@@ -372,7 +375,7 @@ class aclient(discord.Client):
                 # Only send a message if model_out is not None
                 if model_out is not None:
                     response = f"{response_prefix}{model_out}"
-                    logger.info(f"Response complete [size {len(model_out)}]")
+                    logger.info(f"Response complete [size {len(model_out)}] to channel {response_channel.id}")
 
                     if normal_reply:
                         await send_split_message(self, response, message)
@@ -381,20 +384,61 @@ class aclient(discord.Client):
 
         except Exception as e:
             logger.exception(f"Error while sending : {e}")
-            await message.channel.send(f"> **ERROR: Something went wrong.** \n ```ERROR MESSAGE: {e}```")
+            await response_channel.send(f"> **ERROR: Something went wrong.** \n ```ERROR MESSAGE: {e}```")
 
     async def draw(self, prompt) -> list[str]:
-
-        response = await self.client.images.generate(
-            model="dall-e-3",
-            prompt=prompt,
-            n=1,
-            size="1024x1024",
-            quality="standard",
-        )
-        image_url = response.data[0].url
-
-        return image_url
+        """Generate image using DALL-E model"""
+        try:
+            # If using GPT-4o, we can use it to refine/improve the prompt
+            if "gpt-4o" in self.openAI_gpt_engine:
+                # Use GPT-4o to refine the image prompt
+                refine_response = await self.client.chat.completions.create(
+                    model=self.openAI_gpt_engine,
+                    messages=[
+                        {"role": "system", "content": "You are a helpful image prompt engineer. Your task is to enhance the user's image prompt to create the best DALL-E image possible. Return only the enhanced prompt without any explanations or additional text."},
+                        {"role": "user", "content": f"Enhance this image prompt for DALL-E: {prompt}"}
+                    ],
+                    temperature=0.7,
+                    max_tokens=500
+                )
+                
+                # Get the refined prompt
+                refined_prompt = refine_response.choices[0].message.content
+                logger.info(f"Original prompt: {prompt}")
+                logger.info(f"Refined prompt: {refined_prompt}")
+                
+                # Use the refined prompt for DALL-E generation
+                generate_prompt = refined_prompt
+            else:
+                # Use original prompt if not GPT-4o
+                generate_prompt = prompt
+                
+            # Generate the image with DALL-E
+            response = await self.client.images.generate(
+                model="dall-e-3",
+                prompt=generate_prompt,
+                n=1,
+                size="1024x1024",
+                quality="standard",
+            )
+            image_url = response.data[0].url
+            return image_url
+        except Exception as e:
+            logger.error(f"Error in draw function: {e}")
+            # Fall back to original prompt in case of error
+            try:
+                response = await self.client.images.generate(
+                    model="dall-e-3",
+                    prompt=prompt,
+                    n=1,
+                    size="1024x1024",
+                    quality="standard",
+                )
+                image_url = response.data[0].url
+                return image_url
+            except Exception as inner_e:
+                logger.error(f"Error in fallback image generation: {inner_e}")
+                raise inner_e
 
     async def send_start_prompt(self):
         """

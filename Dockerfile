@@ -1,37 +1,43 @@
-FROM python:3.10-bullseye
+# Build stage
+FROM python:3.10-bullseye as builder
 
-ENV PYTHONUNBUFFERED 1
+# Install build dependencies
 RUN apt-get update && apt-get install -y \
-  build-essential \
-  libcairo2-dev \
-  cargo \
-  libfreetype6-dev \
-  gcc \
-  libgdk-pixbuf2.0-dev \
-  gettext \
-  libjpeg-dev \
-  liblcms2-dev \
-  libffi-dev \
-  musl-dev \
-  libopenjp2-7-dev \
-  libssl-dev \
-  libpango1.0-dev \
-  poppler-utils \
-  postgresql-client \
-  libpq-dev \
-  python3-dev \
-  rustc \
-  tcl-dev \
-  libtiff5-dev \
-  tk-dev \
-  zlib1g-dev \
-  python3-pil \
-  fonts-impact
+    build-essential \
+    python3-dev
 
-RUN pip3 install cryptography
-COPY ./ /DiscordBot
+# Create and activate virtual environment
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Runtime stage
+FROM python:3.10-slim-bullseye
+
+# Copy virtual environment from builder
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
+    libcairo2 \
+    libfreetype6 \
+    libgdk-pixbuf2.0-0 \
+    libjpeg62-turbo \
+    liblcms2-2 \
+    libopenjp2-7 \
+    libpango-1.0-0 \
+    libpangocairo-1.0-0 \
+    poppler-utils \
+    postgresql-client \
+    fonts-impact \
+    python3-pil \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /DiscordBot
-ADD ./requirements.txt /DiscordBot/requirements.txt
-RUN pip3 install -r requirements.txt
+COPY . .
 
 CMD ["python3", "main.py"]
