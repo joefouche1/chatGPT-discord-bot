@@ -4,6 +4,7 @@ import asyncio
 import aiohttp
 import io
 import re
+import urllib.parse
 
 from utils.log import logger
 
@@ -99,6 +100,7 @@ class aclient(discord.Client):
         self.history_lock = asyncio.Lock()
         self.init_history()
         self.message_queue = asyncio.Queue()
+        self.system_prompt_sent = False  # Track if system prompt has been sent
 
         self.rate_limiter = commands.CooldownMapping.from_cooldown(1, 5.0, commands.BucketType.user)
 
@@ -147,6 +149,15 @@ class aclient(discord.Client):
             logger.warning(
                 "handle_response took over 40 seconds with no reply.")
 
+        # Check for LaTeX expressions and process them
+        if response and "\\begin{" in response or "\\frac" in response or "\\text" in response:
+            # If we find LaTeX, return a special marker to indicate it needs image processing
+            self.conversation_history.append({
+                "role": "assistant",
+                "content": response
+            })
+            return f"__LATEX_RENDER__{response}"
+        
         # Add the model's response to the conversation history
         self.conversation_history.append({
             "role": "assistant",
@@ -374,8 +385,37 @@ class aclient(discord.Client):
                 
                 # Only send a message if model_out is not None
                 if model_out is not None:
-                    response = f"{response_prefix}{model_out}"
-                    logger.info(f"Response complete [size {len(model_out)}] to channel {response_channel.id}")
+                    # Check if the response contains LaTeX that needs rendering
+                    if model_out.startswith("__LATEX_RENDER__"):
+                        # Extract the actual content
+                        latex_content = model_out[16:]
+                        # Generate a text-only version with removed LaTeX commands for the message
+                        text_content = re.sub(r'\\begin\{.*?\}|\\end\{.*?\}|\\text\{(.*?)\}', r'\1', latex_content)
+                        text_content = re.sub(r'\\[a-zA-Z]+', '', text_content)
+                        text_content = re.sub(r'\\\[|\\\]|\\\(|\\\)|_|\^|&', '', text_content)
+                        
+                        # Create the response message with the original user message
+                        response = f"{response_prefix}{text_content}\n\n*Mathematical expressions rendered as images:*"
+                        
+                        # Send the text part
+                        await send_split_message(self, response, message)
+                        
+                        # Render the LaTeX expressions
+                        image_urls = await self.render_latex(latex_content)
+                        if image_urls:
+                            for url in image_urls:
+                                # Download the image
+                                async with aiohttp.ClientSession() as session:
+                                    async with session.get(url) as resp:
+                                        if resp.status == 200:
+                                            image_data = await resp.read()
+                                            # Create a discord.File object
+                                            image_file = discord.File(io.BytesIO(image_data), filename="math.png")
+                                            # Send the image
+                                            await response_channel.send(file=image_file)
+                    else:
+                        response = f"{response_prefix}{model_out}"
+                        logger.info(f"Response complete [size {len(model_out)}] to channel {response_channel.id}")
 
                     if normal_reply:
                         await send_split_message(self, response, message)
@@ -443,7 +483,12 @@ class aclient(discord.Client):
     async def send_start_prompt(self):
         """
         Sends the starting prompt to the chatbot model and handles the response.
+        Only sends on initial startup, not on reconnects.
         """
+        if self.system_prompt_sent:
+            logger.info("System prompt already sent, skipping...")
+            return
+            
         discord_channel_id = os.getenv("DISCORD_CHANNEL_ID")
         try:
             if self.starting_prompt:
@@ -454,6 +499,7 @@ class aclient(discord.Client):
                     if len(response) > 0:
                         await channel.send(response)
                     logger.info(f"System prompt response:{response}")
+                    self.system_prompt_sent = True  # Mark as sent
                 else:
                     logger.info(
                         "No Channel selected. Skip sending system prompt.")
@@ -499,3 +545,29 @@ class aclient(discord.Client):
             await ctx.send(f"You're doing that too much. Try again in {retry_after:.2f}s.")
             return True
         return False
+
+    async def render_latex(self, latex_text):
+        """Generate an image from LaTeX content"""
+        # Use CodeCogs API to render the LaTeX as an image
+        latex_pattern = r'(\\\[|\\\(|\\begin\{.*?\}|\\frac|\\text).*?(\\\]|\\\)|\\end\{.*?\}|$)'
+        found_expressions = []
+        
+        # Extract all LaTeX expressions
+        all_matches = re.finditer(latex_pattern, latex_text, re.DOTALL)
+        for match in all_matches:
+            found_expressions.append(match.group(0))
+            
+        if not found_expressions:
+            return None
+            
+        image_urls = []
+        for expr in found_expressions:
+            # Clean up the LaTeX
+            clean_expr = expr.replace('\\[', '').replace('\\]', '')
+            # URL encode the LaTeX formula
+            encoded_expr = urllib.parse.quote(clean_expr)
+            # Create URL to the rendered image
+            image_url = f"https://latex.codecogs.com/png.latex?{encoded_expr}"
+            image_urls.append(image_url)
+            
+        return image_urls

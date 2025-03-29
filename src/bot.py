@@ -460,6 +460,51 @@ gpt-engine: {chat_engine_status}
             f"My ID is {client.user.id}\n"
             f"Mention me like this: <@{client.user.id}>"
         )
+        
+    @client.tree.command(name="math", description="Render a LaTeX math expression")
+    async def math(interaction: discord.Interaction, *, latex: str):
+        """Render a LaTeX math expression"""
+        await interaction.response.defer(thinking=True, ephemeral=False)
+        
+        try:
+            # Clean up the LaTeX formula
+            latex = latex.strip()
+            
+            # If not already wrapped in delimiters, add them
+            if not (latex.startswith("\\[") or latex.startswith("\\begin")):
+                latex = "\\[" + latex + "\\]"
+                
+            # Use the render_latex method to generate the image URL
+            image_urls = await client.render_latex(latex)
+            
+            if not image_urls:
+                await interaction.followup.send("Could not parse the LaTeX expression.")
+                return
+                
+            # Create an embed for the response
+            embed = discord.Embed(
+                title="Math Rendering",
+                description=f"```latex\n{latex}\n```",
+                color=discord.Color.blue()
+            )
+            
+            # Download and attach the first image
+            async with aiohttp.ClientSession() as session:
+                async with session.get(image_urls[0]) as resp:
+                    if resp.status == 200:
+                        image_data = await resp.read()
+                        # Create a discord.File object
+                        image_file = discord.File(io.BytesIO(image_data), filename="math.png")
+                        # Set the image in the embed
+                        embed.set_image(url="attachment://math.png")
+                        # Send the embed with the image
+                        await interaction.followup.send(embed=embed, file=image_file)
+                    else:
+                        await interaction.followup.send(f"Failed to generate image (HTTP {resp.status})")
+        
+        except Exception as e:
+            logger.error(f"Error rendering math: {e}")
+            await interaction.followup.send(f"Error rendering math: {str(e)}")
 
     try:
         client.tree.add_command(Meme(client))
