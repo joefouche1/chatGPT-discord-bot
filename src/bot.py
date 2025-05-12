@@ -507,7 +507,8 @@ gpt-engine: {chat_engine_status}
             await interaction.followup.send(f"Error rendering math: {str(e)}")
 
     try:
-        client.tree.add_command(Meme(client))
+        # Add the Meme cog
+        client.add_cog(Meme(client))
         
         TOKEN = os.getenv("DISCORD_BOT_TOKEN")
         client.run(TOKEN)
