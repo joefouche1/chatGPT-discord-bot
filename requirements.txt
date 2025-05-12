@@ -118,3 +118,4 @@ yarl==1.17.1
     # via
     #   -r requirements.in
     #   aiohttp
+Pillow==10.2.0
