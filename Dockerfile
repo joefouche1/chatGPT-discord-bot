@@ -33,7 +33,6 @@ RUN apt-get update && apt-get install -y \
     libpangocairo-1.0-0 \
     poppler-utils \
     postgresql-client \
-    fonts-impact \
     python3-pil \
     && rm -rf /var/lib/apt/lists/*
 
