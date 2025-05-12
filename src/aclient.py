@@ -274,8 +274,14 @@ class aclient(discord.Client):
         """
         Get token count
         """
-        tiktoken.model.MODEL_TO_ENCODING["gpt-4"] = "cl100k_base"
-        encoding = tiktoken.encoding_for_model(self.openAI_gpt_engine)
+        try:
+            # Try to get the encoding for the model
+            encoding = tiktoken.encoding_for_model(self.openAI_gpt_engine)
+        except KeyError:
+            # If model not found, use cl100k_base as default
+            logger.info(f"Model {self.openAI_gpt_engine} not found in tiktoken mappings, using cl100k_base encoding")
+            encoding = tiktoken.get_encoding("cl100k_base")
+            
         num_tokens = 0
         # for message in self.conversation[convo_id]:
         for message in self.conversation_history:
