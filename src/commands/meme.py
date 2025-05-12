@@ -10,7 +10,7 @@ class Meme(commands.Cog):
     def __init__(self, client):
         self.client = client
 
-    @client.tree.command(name="meme", description="Generate a meme based on your prompt")
+    @app_commands.command(name="meme", description="Generate a meme based on your prompt")
     async def meme(self, interaction: discord.Interaction, top_text: str, bottom_text: str):
         await interaction.response.defer(thinking=True)
         
