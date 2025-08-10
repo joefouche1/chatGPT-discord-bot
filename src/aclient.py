@@ -67,7 +67,7 @@ class aclient(commands.Bot):
         super().__init__(command_prefix="!", intents=intents, **kwargs)
         self.conversation_manager = ConversationManager()
 
-        self.tree = app_commands.CommandTree(self)
+        # Use the built-in command tree from commands.Bot (already initialized by super().__init__)
         self.current_channel = None
         self.activity = discord.Activity(
             type=discord.ActivityType.listening, name="bacon sizzle")
