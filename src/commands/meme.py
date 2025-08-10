@@ -9,9 +9,8 @@ import textwrap
 class Meme(commands.Cog):
     def __init__(self, client):
         self.client = client
-        self.meme_group = app_commands.Group(name="meme", description="Meme generation commands")
 
-    @app_commands.command(name="generate", description="Generate a meme based on your prompt")
+    @app_commands.command(name="meme", description="Generate a meme based on your prompt")
     async def generate_meme(self, interaction: discord.Interaction, top_text: str, bottom_text: str):
         await interaction.response.defer(thinking=True)
         
@@ -79,8 +78,5 @@ class Meme(commands.Cog):
         except Exception as e:
             await interaction.followup.send(f"Error generating meme: {str(e)}")
 
-    async def cog_load(self):
-        self.client.tree.add_command(self.meme_group)
-
-def setup(client):
-    client.add_cog(Meme(client)) 
+async def setup(client):
+    await client.add_cog(Meme(client)) 

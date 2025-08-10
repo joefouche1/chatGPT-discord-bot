@@ -50,7 +50,7 @@ class ConversationManager:
         return self.conversation_history
 
 
-class aclient(discord.Client):
+class aclient(commands.Bot):
     """
     This class is a subclass of discord.Client and handles the interaction with the Discord API and the OpenAI API.
     It initializes the chatbot model and processes incoming messages.
@@ -64,7 +64,7 @@ class aclient(discord.Client):
         intents = discord.Intents.default()
         intents.message_content = True
         #intents.members = True
-        super().__init__(intents=intents, **kwargs)
+        super().__init__(command_prefix="!", intents=intents, **kwargs)
         self.conversation_manager = ConversationManager()
 
         self.tree = app_commands.CommandTree(self)
@@ -76,7 +76,7 @@ class aclient(discord.Client):
             int(id) for id in os.getenv("REPLYING_ALL_DISCORD_CHANNEL_IDS").split(','))
 
         self.openAI_API_key = os.getenv("OPENAI_API_KEY")
-        self.openAI_gpt_engine = os.getenv("GPT_ENGINE")
+        self.openAI_gpt_engine = os.getenv("GPT_ENGINE", "gpt-5")
         self.temperature = 0.75
         self.client = AsyncOpenAI()
 
@@ -233,41 +233,42 @@ class aclient(discord.Client):
 
     async def handle_image_attachment(self, message: discord.Message, user_message: str) -> str:
         """
-            Handle processing of image attachments using GPT-4o's vision capabilities
+            Handle processing of image attachments and add them to conversation history cleanly.
         """
         img_url = message.attachments[0].url + "?width=500&height=500"
 
         logger.info(f"Prompting with photo at {img_url}")
         
-        # Craft the prompt for GPT-4o
-        prompt_message = [
-            {
+        # Append the image + text as a single user message into the persistent history
+        async with self.history_lock:
+            self.conversation_history.append({
                 "role": "user",
                 "content": [
-                    {
-                        "type": "text",
-                        "text": user_message
-                    },
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": img_url
-                        }
-                    }
+                    {"type": "text", "text": user_message},
+                    {"type": "image_url", "image_url": {"url": img_url}}
                 ]
-            }
-        ]
-        newhist = self.conversation_history + prompt_message
+            })
 
-        # Use GPT-4o for image understanding regardless of the general engine setting
-        # This ensures best image understanding capabilities
+        await self.__truncate_conversation()
+
+        # Use GPT-5 for image understanding while preserving context
         completion = await self.client.chat.completions.create(
-            model="gpt-4o",  # Always use GPT-4o for image handling
-            messages=newhist,
+            model="gpt-5",
+            messages=self.conversation_history,
             temperature=self.temperature,
-            max_tokens=2000
+            max_completion_tokens=10000
         )
-        return completion.choices[0].message.content
+
+        reply = completion.choices[0].message.content
+
+        # Add assistant's reply to history
+        async with self.history_lock:
+            self.conversation_history.append({
+                "role": "assistant",
+                "content": reply
+            })
+
+        return reply
 
     # https://github.com/openai/openai-cookbook/blob/main/examples/How_to_count_tokens_with_tiktoken.ipynb
     def get_token_count(self, convo_id: str = "default") -> int:
@@ -285,13 +286,39 @@ class aclient(discord.Client):
         num_tokens = 0
         # for message in self.conversation[convo_id]:
         for message in self.conversation_history:
-            # every message follows <im_start>{role/name}\n{content}<im_end>\n
+            # base overhead per message
             num_tokens += 5
-            for key, value in message.items():
-                if value:
-                    num_tokens += len(encoding.encode(value))
-                if key == "name":  # if there's a name, the role is omitted
-                    num_tokens += 5  # role is always required and always 1 token
+
+            role = message.get("role")
+            if role:
+                num_tokens += len(encoding.encode(role))
+
+            content = message.get("content")
+            if isinstance(content, str):
+                num_tokens += len(encoding.encode(content))
+            elif isinstance(content, list):
+                for part in content:
+                    if not isinstance(part, dict):
+                        continue
+                    part_type = part.get("type")
+                    if part_type == "text":
+                        text_value = part.get("text", "")
+                        if text_value:
+                            num_tokens += len(encoding.encode(text_value))
+                    elif part_type == "image_url":
+                        # Rough overhead for an image reference; images don't consume text tokens
+                        num_tokens += 10
+                    else:
+                        # Fallback: ignore unknown parts
+                        pass
+            elif isinstance(content, dict):
+                # Rare case: serialize keys minimally
+                for k, v in content.items():
+                    if isinstance(v, str):
+                        num_tokens += len(encoding.encode(v))
+            # name handling
+            if "name" in message:
+                num_tokens += 5
         num_tokens += 5  # every reply is primed with <im_start>assistant
         return num_tokens
 
@@ -339,7 +366,7 @@ class aclient(discord.Client):
         stream = await self.client.chat.completions.create(model=engine,
                                                            messages=self.conversation_history,
                                                            temperature=self.temperature,
-                                                           max_tokens=4000,
+                                                           max_completion_tokens=4000,
                                                            stream=True)
 
         async for completion in stream:
@@ -435,29 +462,24 @@ class aclient(discord.Client):
     async def draw(self, prompt) -> list[str]:
         """Generate image using DALL-E model"""
         try:
-            # If using GPT-4o, we can use it to refine/improve the prompt
-            if "gpt-4o" in self.openAI_gpt_engine:
-                # Use GPT-4o to refine the image prompt
-                refine_response = await self.client.chat.completions.create(
-                    model=self.openAI_gpt_engine,
-                    messages=[
-                        {"role": "system", "content": "You are a helpful image prompt engineer. Your task is to enhance the user's image prompt to create the best DALL-E image possible. Return only the enhanced prompt without any explanations or additional text."},
-                        {"role": "user", "content": f"Enhance this image prompt for DALL-E: {prompt}"}
-                    ],
-                    temperature=0.7,
-                    max_tokens=500
-                )
-                
-                # Get the refined prompt
-                refined_prompt = refine_response.choices[0].message.content
-                logger.info(f"Original prompt: {prompt}")
-                logger.info(f"Refined prompt: {refined_prompt}")
-                
-                # Use the refined prompt for DALL-E generation
-                generate_prompt = refined_prompt
-            else:
-                # Use original prompt if not GPT-4o
-                generate_prompt = prompt
+            # Use GPT-5 to refine/improve the prompt
+            refine_response = await self.client.chat.completions.create(
+                model="gpt-5",
+                messages=[
+                    {"role": "system", "content": "You are a helpful image prompt engineer. Your task is to enhance the user's image prompt to create the best DALL-E image possible. Return only the enhanced prompt without any explanations or additional text."},
+                    {"role": "user", "content": f"Enhance this image prompt for DALL-E: {prompt}"}
+                ],
+                temperature=0.7,
+                max_completion_tokens=500
+            )
+            
+            # Get the refined prompt
+            refined_prompt = refine_response.choices[0].message.content
+            logger.info(f"Original prompt: {prompt}")
+            logger.info(f"Refined prompt: {refined_prompt}")
+            
+            # Use the refined prompt for DALL-E generation
+            generate_prompt = refined_prompt
                 
             # Generate the image with DALL-E
             response = await self.client.images.generate(
@@ -531,7 +553,7 @@ class aclient(discord.Client):
             model=self.openAI_gpt_engine,
             messages=self.conversation_history,
             temperature=self.temperature,
-            max_tokens=1000
+            max_completion_tokens=1000
         )
 
         response = completion.choices[0].message.content

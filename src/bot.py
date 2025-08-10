@@ -508,7 +508,7 @@ gpt-engine: {chat_engine_status}
 
     try:
         # Add the Meme cog
-        client.add_cog(Meme(client))
+        asyncio.run(client.add_cog(Meme(client)))
         
         TOKEN = os.getenv("DISCORD_BOT_TOKEN")
         client.run(TOKEN)

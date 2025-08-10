@@ -64,7 +64,7 @@ async def parse_sports_query(query: str, client):
     ]
     
     completion = await client.chat.completions.create(
-        model="gpt-4o-mini",
+        model="gpt-5",
         messages=messages
     )
     response = completion.choices[0].message.content
@@ -250,7 +250,7 @@ async def get_sports_score(query: str, client=None, live=False) -> str:
         ]
         
         completion = await client.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-5",
             messages=messages
         )
         return completion.choices[0].message.content

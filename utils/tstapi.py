@@ -8,9 +8,9 @@ load_dotenv()
 async def test_api():
     client = AsyncOpenAI()
 
-    stream = await client.chat.completions.create(model="gpt-3.5-turbo",
+    stream = await client.chat.completions.create(model="gpt-5",
                                                   stream=True,
-                                                  max_tokens=1000,
+                                                  max_completion_tokens=1000,
                                                   messages=[{"role": "user", "content": "Oink oink! What's the diameter of the average avocado?"}])
 
     async for completion in stream:
