@@ -1,5 +1,5 @@
 # Build stage
-FROM python:3.10-bullseye as builder
+FROM python:3.13-bullseye as builder
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
@@ -15,7 +15,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Runtime stage
-FROM python:3.10-slim-bullseye
+FROM python:3.13-slim-bullseye
 
 # Copy virtual environment from builder
 COPY --from=builder /opt/venv /opt/venv
