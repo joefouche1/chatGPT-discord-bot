@@ -5,6 +5,8 @@ import aiohttp
 import io
 import re
 import urllib.parse
+import base64
+from PIL import Image
 
 from utils.log import logger
 
@@ -103,23 +105,114 @@ class aclient(commands.Bot):
         self.system_prompt_sent = False  # Track if system prompt has been sent
 
         self.rate_limiter = commands.CooldownMapping.from_cooldown(1, 5.0, commands.BucketType.user)
+        
+        # Image cache to store low-resolution versions of Discord images
+        self.image_cache = {}  # {original_url: base64_data_url}
+        self.max_cache_size = 50  # Maximum number of images to cache
 
     def init_history(self):
         """
-        Initializes the conversation history with a system prompt.
+        Initializes the conversation history without system prompt (will use instructions parameter instead).
         """
-        self.conversation_history = [
-            {
-                "role": "system",
-                "content": self.starting_prompt
-            }
-        ]
+        self.conversation_history = []
 
     async def ainit_history(self):
         """
         Asynchronously initializes the conversation history with a system prompt.
         """
         await self.init_history()
+
+    def _format_history_for_responses(self):
+        """
+        Format conversation history for the Responses API.
+        Combines all messages into a single input string.
+        """
+        if not self.conversation_history:
+            return ""
+        
+        formatted_parts = []
+        for msg in self.conversation_history:
+            role = msg.get("role")
+            content = msg.get("content")
+            
+            if isinstance(content, str):
+                if role == "user":
+                    formatted_parts.append(f"User: {content}")
+                elif role == "assistant":
+                    formatted_parts.append(f"Assistant: {content}")
+            elif isinstance(content, list):
+                # Handle multimodal content
+                text_parts = []
+                for part in content:
+                    if part.get("type") == "text":
+                        text_parts.append(part.get("text", ""))
+                if text_parts:
+                    combined_text = " ".join(text_parts)
+                    if role == "user":
+                        formatted_parts.append(f"User: {combined_text}")
+                    elif role == "assistant":
+                        formatted_parts.append(f"Assistant: {combined_text}")
+        
+        return "\n\n".join(formatted_parts)
+
+    async def cache_discord_image(self, image_url: str) -> str:
+        """
+        Downloads and caches a Discord image as a low-resolution base64 data URL.
+        Returns the cached data URL to avoid CDN expiration issues.
+        """
+        # Check if already cached
+        if image_url in self.image_cache:
+            return self.image_cache[image_url]
+        
+        try:
+            # Download the image
+            async with aiohttp.ClientSession() as session:
+                async with session.get(image_url) as resp:
+                    if resp.status != 200:
+                        logger.error(f"Failed to download image: {resp.status}")
+                        return image_url  # Fallback to original URL
+                    
+                    image_data = await resp.read()
+            
+            # Open and resize the image to low resolution
+            img = Image.open(io.BytesIO(image_data))
+            
+            # Convert to RGB if necessary (to handle RGBA images)
+            if img.mode in ('RGBA', 'LA'):
+                # Create a white background
+                bg = Image.new('RGB', img.size, (255, 255, 255))
+                if img.mode == 'RGBA':
+                    bg.paste(img, mask=img.split()[-1])  # Use alpha channel as mask
+                else:
+                    bg.paste(img)
+                img = bg
+            elif img.mode != 'RGB':
+                img = img.convert('RGB')
+            
+            # Resize to low resolution to save memory (max 400px on longest side)
+            img.thumbnail((400, 400), Image.Resampling.LANCZOS)
+            
+            # Convert to base64 data URL
+            buffered = io.BytesIO()
+            img.save(buffered, format="JPEG", quality=85, optimize=True)
+            img_str = base64.b64encode(buffered.getvalue()).decode()
+            data_url = f"data:image/jpeg;base64,{img_str}"
+            
+            # Cache the result with cache size management
+            if len(self.image_cache) >= self.max_cache_size:
+                # Remove oldest entry (simple FIFO)
+                oldest_key = next(iter(self.image_cache))
+                del self.image_cache[oldest_key]
+                logger.info(f"Removed oldest cached image to make space")
+            
+            self.image_cache[image_url] = data_url
+            logger.info(f"Cached image with size: {len(img_str)} characters")
+            
+            return data_url
+            
+        except Exception as e:
+            logger.error(f"Error caching image {image_url}: {e}")
+            return image_url  # Fallback to original URL
 
     async def handle_response(self, message: discord.Message = None) -> str:
         """
@@ -235,31 +328,44 @@ class aclient(commands.Bot):
         """
             Handle processing of image attachments and add them to conversation history cleanly.
         """
-        img_url = message.attachments[0].url + "?width=500&height=500"
+        original_img_url = message.attachments[0].url + "?width=500&height=500"
 
-        logger.info(f"Prompting with photo at {img_url}")
+        logger.info(f"Prompting with photo at {original_img_url}")
+        
+        # Cache the image to avoid CDN expiration issues
+        cached_img_url = await self.cache_discord_image(original_img_url)
         
         # Append the image + text as a single user message into the persistent history
+        # Use cached image URL to prevent CDN expiration
         async with self.history_lock:
             self.conversation_history.append({
                 "role": "user",
                 "content": [
                     {"type": "text", "text": user_message},
-                    {"type": "image_url", "image_url": {"url": img_url}}
+                    {"type": "image_url", "image_url": {"url": cached_img_url}}
                 ]
             })
 
         await self.__truncate_conversation()
 
+        # Format multimodal input for Responses API
+        # Use cached image URL for API calls as well
+        multimodal_input = [
+            {"type": "input_text", "text": self._format_history_for_responses()},
+            {"type": "input_text", "text": f"\n\nUser: {user_message}"},
+            {"type": "input_image", "image_url": cached_img_url}
+        ]
+
         # Use GPT-5 for image understanding while preserving context
-        completion = await self.client.chat.completions.create(
+        completion = await self.client.responses.create(
             model="gpt-5",
-            messages=self.conversation_history,
+            instructions=self.starting_prompt,
+            input=multimodal_input,
             temperature=self.temperature,
-            max_completion_tokens=10000
+            max_output_tokens=10000
         )
 
-        reply = completion.choices[0].message.content
+        reply = completion.output
 
         # Add assistant's reply to history
         async with self.history_lock:
@@ -363,17 +469,18 @@ class aclient(commands.Bot):
             logger.warning("No history is set!")
 
         # Initialize the chat models with the conversation history
-        stream = await self.client.chat.completions.create(model=engine,
-                                                           messages=self.conversation_history,
-                                                           temperature=self.temperature,
-                                                           max_completion_tokens=4000,
-                                                           stream=True)
+        stream = await self.client.responses.create(
+            model=engine,
+            instructions=self.starting_prompt,
+            input=self._format_history_for_responses(),
+            temperature=self.temperature,
+            max_output_tokens=4000,
+            stream=True
+        )
 
-        async for completion in stream:
-            # print(completion.model_dump_json())
-            dd = completion.choices[0].delta
-            if dd.content is not None:
-                yield dd.content
+        async for event in stream:
+            if event.type == 'content.text.delta':
+                yield event.text
 
     async def process_messages(self):
         while True:
@@ -463,18 +570,16 @@ class aclient(commands.Bot):
         """Generate image using DALL-E model"""
         try:
             # Use GPT-5 to refine/improve the prompt
-            refine_response = await self.client.chat.completions.create(
+            refine_response = await self.client.responses.create(
                 model="gpt-5",
-                messages=[
-                    {"role": "system", "content": "You are a helpful image prompt engineer. Your task is to enhance the user's image prompt to create the best DALL-E image possible. Return only the enhanced prompt without any explanations or additional text."},
-                    {"role": "user", "content": f"Enhance this image prompt for DALL-E: {prompt}"}
-                ],
+                instructions="You are a helpful image prompt engineer. Your task is to enhance the user's image prompt to create the best DALL-E image possible. Return only the enhanced prompt without any explanations or additional text.",
+                input=f"Enhance this image prompt for DALL-E: {prompt}",
                 temperature=0.7,
-                max_completion_tokens=500
+                max_output_tokens=500
             )
             
             # Get the refined prompt
-            refined_prompt = refine_response.choices[0].message.content
+            refined_prompt = refine_response.output
             logger.info(f"Original prompt: {prompt}")
             logger.info(f"Refined prompt: {refined_prompt}")
             
@@ -549,14 +654,15 @@ class aclient(commands.Bot):
         await self.__truncate_conversation()
 
         # Get completion from OpenAI
-        completion = await self.client.chat.completions.create(
+        completion = await self.client.responses.create(
             model=self.openAI_gpt_engine,
-            messages=self.conversation_history,
+            instructions=self.starting_prompt,
+            input=self._format_history_for_responses(),
             temperature=self.temperature,
-            max_completion_tokens=1000
+            max_output_tokens=1000
         )
 
-        response = completion.choices[0].message.content
+        response = completion.output
 
         # Add the response to conversation history
         self.conversation_history.append({

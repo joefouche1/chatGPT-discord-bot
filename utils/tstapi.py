@@ -8,13 +8,19 @@ load_dotenv()
 async def test_api():
     client = AsyncOpenAI()
 
-    stream = await client.chat.completions.create(model="gpt-5",
-                                                  stream=True,
-                                                  max_completion_tokens=1000,
-                                                  messages=[{"role": "user", "content": "Oink oink! What's the diameter of the average avocado?"}])
+    stream = await client.responses.create(
+        model="gpt-5",
+        stream=True,
+        max_output_tokens=1000,
+        instructions="You are a helpful assistant.",
+        input="Oink oink! What's the diameter of the average avocado?"
+    )
 
-    async for completion in stream:
-        print(completion.model_dump_json())
+    async for event in stream:
+        if event.type == 'content.text.delta':
+            print(event.text, end='', flush=True)
+        elif event.type == 'content.text.done':
+            print()  # Newline at the end
 
 # Create an event loop
 loop = asyncio.get_event_loop()

@@ -1,0 +1,172 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "chatgpt-discord-bot"
+version = "1.0.0"
+description = "A Discord bot powered by ChatGPT, Google Bard, and Microsoft Bing"
+authors = [
+    {name = "ChatGPT Discord Bot Contributors"}
+]
+readme = "README.md"
+license = {file = "LICENSE"}
+requires-python = ">=3.13.3"
+keywords = ["discord", "bot", "chatgpt", "openai", "bard", "bing"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Communications :: Chat",
+    "Topic :: Internet :: WWW/HTTP :: Dynamic Content",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+dependencies = [
+    "discord.py",
+    "python-dotenv", 
+    "asgiref",
+    "openai",
+    "requests-cache",
+    "tiktoken",
+    "aiohttp",
+    "multidict",
+    "requests",
+    "attrs",
+    "yarl",
+    "idna",
+    "charset-normalizer",
+    "propcache",
+    "aiohappyeyeballs",
+    "aiosignal",
+    "async-timeout",
+    "frozenlist",
+    "urllib3",
+    "certifi",
+    "url-normalize",
+    "Pillow",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21.0",
+    "black>=23.0.0",
+    "flake8>=6.0.0",
+    "mypy>=1.0.0",
+    "pre-commit>=3.0.0",
+]
+
+docker = [
+    "gunicorn>=21.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/Zero6992/chatGPT-discord-bot"
+Repository = "https://github.com/Zero6992/chatGPT-discord-bot"
+Issues = "https://github.com/Zero6992/chatGPT-discord-bot/issues"
+
+[project.scripts]
+chatgpt-discord-bot = "main:main"
+
+[tool.setuptools]
+packages = ["src", "utils"]
+
+[tool.setuptools.package-data]
+"*" = ["*.txt", "*.json", "*.yml", "*.yaml"]
+
+[tool.black]
+line-length = 88
+target-version = ['py313']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | _build
+  | buck-out
+  | build
+  | dist
+)/
+'''
+
+[tool.mypy]
+python_version = "3.13"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_equality = true
+
+[[tool.mypy.overrides]]
+module = ["discord.*", "requests_cache.*", "tiktoken.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-v",
+    "--tb=short",
+    "--strict-markers",
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "unit: marks tests as unit tests",
+]
+
+[tool.flake8]
+max-line-length = 88
+extend-ignore = ["E203", "W503", "E501"]
+exclude = [
+    ".git",
+    "__pycache__",
+    "build",
+    "dist",
+    ".venv",
+    ".env",
+]
+
+[tool.coverage.run]
+source = ["src", "utils"]
+omit = [
+    "*/tests/*",
+    "*/test_*",
+    "*/__pycache__/*",
+    "*/venv/*",
+    "*/.venv/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "if settings.DEBUG",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if 0:",
+    "if __name__ == .__main__.:",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod",
+]
