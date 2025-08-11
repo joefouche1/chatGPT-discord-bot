@@ -79,7 +79,7 @@ class aclient(commands.Bot):
 
         self.openAI_API_key = os.getenv("OPENAI_API_KEY")
         self.openAI_gpt_engine = os.getenv("GPT_ENGINE", "gpt-5")
-        self.temperature = 0.75
+        self.temperature = 1 # expected by gpt5
         self.client = AsyncOpenAI()
 
         config_dir = os.path.abspath(f"{__file__}/../../")
