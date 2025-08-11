@@ -574,7 +574,7 @@ class aclient(commands.Bot):
                 model="gpt-5",
                 instructions="You are a helpful image prompt engineer. Your task is to enhance the user's image prompt to create the best DALL-E image possible. Return only the enhanced prompt without any explanations or additional text.",
                 input=f"Enhance this image prompt for DALL-E: {prompt}",
-                temperature=0.7,
+                temperature=self.temperature,
                 max_output_tokens=500
             )
             
@@ -628,8 +628,16 @@ class aclient(commands.Bot):
                 if (discord_channel_id):
                     channel = self.get_channel(int(discord_channel_id))
                     logger.info(f"Send system prompt with size {len(self.starting_prompt)}")
+                    
+                    # Add a startup message to conversation history to provide context for the response
+                    async with self.history_lock:
+                        self.conversation_history.append({
+                            "role": "user",
+                            "content": "Hello! I'm starting up the bot. Please introduce yourself and let me know you're ready to help."
+                        })
+                    
                     response = await self.handle_response()
-                    if len(response) > 0:
+                    if response and len(response) > 0:
                         await channel.send(response)
                     logger.info(f"System prompt response:{response}")
                     self.system_prompt_sent = True  # Mark as sent
