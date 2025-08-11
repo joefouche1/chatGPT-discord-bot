@@ -11,6 +11,7 @@ from PIL import Image
 from utils.log import logger
 
 from utils.message_utils import send_split_message
+from src.conversation_manager import EnhancedConversationManager, JSONMemoryStorage
 
 from dotenv import load_dotenv
 
@@ -41,15 +42,7 @@ It handles the interaction with the Discord API and the OpenAI API.
 """
 
 
-class ConversationManager:
-    def __init__(self):
-        self.conversation_history = []
-
-    def add_message(self, message):
-        self.conversation_history.append(message)
-
-    def get_history(self):
-        return self.conversation_history
+# ConversationManager moved to conversation_manager.py for enhanced per-channel support
 
 
 class aclient(commands.Bot):
@@ -67,7 +60,14 @@ class aclient(commands.Bot):
         intents.message_content = True
         #intents.members = True
         super().__init__(command_prefix="!", intents=intents, **kwargs)
-        self.conversation_manager = ConversationManager()
+        
+        # Initialize enhanced conversation manager with persistence support
+        enable_persistence = os.getenv("ENABLE_PERSISTENCE", "false").lower() == "true"
+        self.conversation_manager = EnhancedConversationManager(
+            storage=JSONMemoryStorage("conversation_memories"),
+            enable_persistence=enable_persistence,
+            max_inactive_hours=168  # 7 days
+        )
 
         # Use the built-in command tree from commands.Bot (already initialized by super().__init__)
         self.current_channel = None
@@ -98,9 +98,8 @@ class aclient(commands.Bot):
             else 3500
         )
 
-        self.conversation_history = None
-        self.history_lock = asyncio.Lock()
-        self.init_history()
+        # No longer using single conversation_history - managed per channel
+        self.history_lock = asyncio.Lock()  # Keep for compatibility
         self.message_queue = asyncio.Queue()
         self.system_prompt_sent = False  # Track if system prompt has been sent
 
@@ -110,28 +109,19 @@ class aclient(commands.Bot):
         self.image_cache = {}  # {original_url: base64_data_url}
         self.max_cache_size = 50  # Maximum number of images to cache
 
-    def init_history(self):
-        """
-        Initializes the conversation history without system prompt (will use instructions parameter instead).
-        """
-        self.conversation_history = []
+    # init_history methods no longer needed - handled by conversation manager per channel
 
-    async def ainit_history(self):
-        """
-        Asynchronously initializes the conversation history with a system prompt.
-        """
-        await self.init_history()
-
-    def _format_history_for_responses(self):
+    async def _format_history_for_responses(self, channel_id: str):
         """
         Format conversation history for the Responses API.
         Combines all messages into a single input string.
         """
-        if not self.conversation_history:
+        conversation_history = await self.conversation_manager.get_history(channel_id)
+        if not conversation_history:
             return ""
         
         formatted_parts = []
-        for msg in self.conversation_history:
+        for msg in conversation_history:
             role = msg.get("role")
             content = msg.get("content")
             
@@ -214,7 +204,7 @@ class aclient(commands.Bot):
             logger.error(f"Error caching image {image_url}: {e}")
             return image_url  # Fallback to original URL
 
-    async def handle_response(self, message: discord.Message = None) -> str:
+    async def handle_response(self, message: discord.Message = None, channel_id: str = None) -> str:
         """
         Handles the response from the chatbot model and adds it to the conversation history.
         """
@@ -222,7 +212,7 @@ class aclient(commands.Bot):
         spoke = False
         spoke2 = False
 
-        async_generator = self.ask_stream_async(message)
+        async_generator = self.ask_stream_async(message, channel_id)
         try:
             while True:
                 try:
@@ -245,17 +235,19 @@ class aclient(commands.Bot):
         # Check for LaTeX expressions and process them
         if response and "\\begin{" in response or "\\frac" in response or "\\text" in response:
             # If we find LaTeX, return a special marker to indicate it needs image processing
-            self.conversation_history.append({
-                "role": "assistant",
-                "content": response
-            })
+            if channel_id:
+                await self.conversation_manager.add_message(channel_id, {
+                    "role": "assistant",
+                    "content": response
+                })
             return f"__LATEX_RENDER__{response}"
         
         # Add the model's response to the conversation history
-        self.conversation_history.append({
-            "role": "assistant",
-            "content": response
-        })
+        if channel_id:
+            await self.conversation_manager.add_message(channel_id, {
+                "role": "assistant",
+                "content": response
+            })
 
         try:
             action_result = await process_action_code(response)
@@ -329,6 +321,7 @@ class aclient(commands.Bot):
             Handle processing of image attachments and add them to conversation history cleanly.
         """
         original_img_url = message.attachments[0].url + "?width=500&height=500"
+        channel_id = str(message.channel.id)
 
         logger.info(f"Prompting with photo at {original_img_url}")
         
@@ -337,20 +330,19 @@ class aclient(commands.Bot):
         
         # Append the image + text as a single user message into the persistent history
         # Use cached image URL to prevent CDN expiration
-        async with self.history_lock:
-            self.conversation_history.append({
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": user_message},
-                    {"type": "image_url", "image_url": {"url": cached_img_url}}
-                ]
-            })
+        await self.conversation_manager.add_message(channel_id, {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": user_message},
+                {"type": "image_url", "image_url": {"url": cached_img_url}}
+            ]
+        })
 
-        await self.__truncate_conversation()
+        await self.__truncate_conversation(channel_id)
 
         # Format multimodal input for Responses API
         # Wrap content under a single user message per current schema
-        combined_text = f"{self._format_history_for_responses()}\n\nUser: {user_message}"
+        combined_text = f"{await self._format_history_for_responses(channel_id)}\n\nUser: {user_message}"
         multimodal_input = [
             {
                 "type": "message",
@@ -374,18 +366,17 @@ class aclient(commands.Bot):
         reply = getattr(completion, "output_text", None) or getattr(completion, "output", "")
 
         # Add assistant's reply to history
-        async with self.history_lock:
-            self.conversation_history.append({
-                "role": "assistant",
-                "content": reply
-            })
+        await self.conversation_manager.add_message(channel_id, {
+            "role": "assistant",
+            "content": reply
+        })
 
         return reply
 
     # https://github.com/openai/openai-cookbook/blob/main/examples/How_to_count_tokens_with_tiktoken.ipynb
-    def get_token_count(self, convo_id: str = "default") -> int:
+    async def get_token_count(self, channel_id: str) -> int:
         """
-        Get token count
+        Get token count for a specific channel's conversation
         """
         try:
             # Try to get the encoding for the model
@@ -396,8 +387,8 @@ class aclient(commands.Bot):
             encoding = tiktoken.get_encoding("cl100k_base")
             
         num_tokens = 0
-        # for message in self.conversation[convo_id]:
-        for message in self.conversation_history:
+        conversation_history = await self.conversation_manager.get_history(channel_id)
+        for message in conversation_history:
             # base overhead per message
             num_tokens += 5
 
@@ -434,47 +425,43 @@ class aclient(commands.Bot):
         num_tokens += 5  # every reply is primed with <im_start>assistant
         return num_tokens
 
-    async def __truncate_conversation(self, convo_id: str = "default") -> None:
+    async def __truncate_conversation(self, channel_id: str) -> None:
         """
-        Truncate the conversation
+        Truncate the conversation for a specific channel
         """
         while True:
-            if (self.get_token_count(convo_id) > self.truncate_limit and len(self.conversation_history) > 1):
-                # Don't remove the first message
-                async with self.history_lock:
-                    self.conversation_history.pop(1)
-                logger.info("popped an old message!")
+            conversation_history = await self.conversation_manager.get_history(channel_id)
+            if (await self.get_token_count(channel_id) > self.truncate_limit and len(conversation_history) > 1):
+                # Remove the second message (keep system/first message)
+                context = await self.conversation_manager.get_or_create_context(channel_id)
+                async with context.lock:
+                    if len(context.conversation_history) > 1:
+                        context.conversation_history.pop(1)
+                        logger.info(f"popped an old message from channel {channel_id}!")
             else:
                 break
 
-    async def ask_stream_async(self, message=None):
+    async def ask_stream_async(self, message=None, channel_id=None):
         """
         Adds the user's message to the conversation history and initializes
         the chat models with the conversation history.
         """
         engine = self.openAI_gpt_engine
+        
+        if not channel_id:
+            logger.warning("No channel_id provided to ask_stream_async")
+            return
+            
         if message:
-            # Check if the current message contains the tag *GPT4*
-            # if "*GPT4*" in message:
-            #     engine = 'gpt-4'
-            #     # Remove the gpt4 hint from the content
-            #     logger.info("Using GPT4 for current activity")
-            #     message = message.replace("*GPT4*", "")
+            # Add the user's message to the conversation history
+            await self.conversation_manager.add_message(channel_id, {
+                "role": "user",
+                "content": message
+            })
 
-            # Acquire the lock before modifying the conversation_history
-            async with self.history_lock:
-                # Add the user's message to the conversation history
-                self.conversation_history.append({
-                    "role": "user",
-                    "content": message
-                })
+        await self.__truncate_conversation(channel_id)
 
-        await self.__truncate_conversation()
-
-        if self.conversation_history is None:
-            logger.warning("No history is set!")
-
-        formatted_input = self._format_history_for_responses()
+        formatted_input = await self._format_history_for_responses(channel_id)
         logger.info(f"Sending to API - Input length: {len(formatted_input)}")
         logger.info(f"Input preview: {formatted_input[:200]}...")
 
@@ -523,6 +510,13 @@ class aclient(commands.Bot):
         author = message.author.id
         # Ensure we're explicitly using the message's channel rather than current_channel
         response_channel = message.channel
+        channel_id = str(message.channel.id)
+        
+        # Get or create context for this channel
+        channel_name = getattr(message.channel, 'name', None)
+        guild_name = getattr(message.guild, 'name', None) if message.guild else None
+        await self.conversation_manager.get_or_create_context(channel_id, channel_name, guild_name)
+        
         try:
             # Check if the message has any attachments
             if message.attachments:
@@ -538,7 +532,7 @@ class aclient(commands.Bot):
                 else:
                     response_prefix = ""
 
-                model_out = await self.handle_response(user_message)
+                model_out = await self.handle_response(user_message, channel_id)
                 
                 # Only send a message if model_out is not None
                 if model_out is not None:
@@ -644,16 +638,21 @@ class aclient(commands.Bot):
             if self.starting_prompt:
                 if (discord_channel_id):
                     channel = self.get_channel(int(discord_channel_id))
+                    channel_id = str(discord_channel_id)
                     logger.info(f"Send system prompt with size {len(self.starting_prompt)}")
                     
-                    # Add a startup message to conversation history to provide context for the response
-                    async with self.history_lock:
-                        self.conversation_history.append({
-                            "role": "user",
-                            "content": "Hello! I'm starting up the bot. Please introduce yourself and let me know you're ready to help."
-                        })
+                    # Get or create context for startup channel
+                    channel_name = getattr(channel, 'name', None)
+                    guild_name = getattr(channel.guild, 'name', None) if channel.guild else None
+                    await self.conversation_manager.get_or_create_context(channel_id, channel_name, guild_name)
                     
-                    response = await self.handle_response()
+                    # Add a startup message to conversation history to provide context for the response
+                    await self.conversation_manager.add_message(channel_id, {
+                        "role": "user",
+                        "content": "Hello! I'm starting up the bot. Please introduce yourself and let me know you're ready to help."
+                    })
+                    
+                    response = await self.handle_response(None, channel_id)
                     if response and len(response) > 0:
                         await channel.send(response)
                     logger.info(f"System prompt response:{response}")
@@ -666,23 +665,23 @@ class aclient(commands.Bot):
         except Exception as e:
             logger.exception(f"Error while sending system prompt: {e}")
 
-    async def get_chat_response(self, message: str) -> str:
+    async def get_chat_response(self, message: str, channel_id: str) -> str:
         """
-        Gets a simple chat response without streaming.
+        Gets a simple chat response without streaming for a specific channel.
         """
         # Add the user's message to conversation history
-        self.conversation_history.append({
+        await self.conversation_manager.add_message(channel_id, {
             "role": "user",
             "content": message
         })
 
-        await self.__truncate_conversation()
+        await self.__truncate_conversation(channel_id)
 
         # Get completion from OpenAI
         completion = await self.client.responses.create(
             model=self.openAI_gpt_engine,
             instructions=self.starting_prompt,
-            input=self._format_history_for_responses(),
+            input=await self._format_history_for_responses(channel_id),
             temperature=self.temperature,
             max_output_tokens=1000
         )
@@ -690,7 +689,7 @@ class aclient(commands.Bot):
         response = getattr(completion, "output_text", None) or getattr(completion, "output", "")
 
         # Add the response to conversation history
-        self.conversation_history.append({
+        await self.conversation_manager.add_message(channel_id, {
             "role": "assistant",
             "content": response
         })

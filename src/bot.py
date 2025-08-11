@@ -20,6 +20,7 @@ from src.commands.news import get_news
 from src.commands.sports import get_sports_score, format_sports_response  # Assuming you've already moved this
 from src.commands.actions import ACTION_CODES, process_action_code
 from src.commands.meme import Meme
+from src.commands.context import ContextCommands
 
 import sys
 import fcntl
@@ -115,14 +116,15 @@ def run_discord_bot():
         logger.info(
             f'{client.user} is now running! listening on {client.replying_all_discord_channel_ids}')
 
-    @client.tree.command(name="reset", description="Complete reset conversation history")
+    @client.tree.command(name="reset", description="Reset conversation history for this channel")
     async def reset(interaction: discord.Interaction):
-        """Command to reset the conversation history."""
+        """Command to reset the conversation history for the current channel."""
         await interaction.response.defer(ephemeral=False)
-        await client.ainit_history()
-        await interaction.followup.send("> **INFO: I have forgotten everything.**")
+        channel_id = str(interaction.channel_id)
+        await client.conversation_manager.clear_context(channel_id)
+        await interaction.followup.send("> **INFO: I have forgotten everything in this channel.**")
         logger.warning(
-            f"\x1b[31m{client.chat_model} bot has been successfully reset\x1b[0m")
+            f"\x1b[31m{client.openAI_gpt_engine} bot has been successfully reset for channel {channel_id}\x1b[0m")
 
     @client.tree.command(name="help", description="Show help for the bot")
     async def help(interaction: discord.Interaction):
@@ -316,7 +318,8 @@ gpt-engine: {chat_engine_status}
                 if article.get('description'):
                     prompt += f"  {article['description']}\n"
 
-            summary = await client.get_chat_response(prompt)
+            channel_id = str(interaction.channel_id)
+            summary = await client.get_chat_response(prompt, channel_id)
             
             # Create and send embed
             embed = discord.Embed(
@@ -507,8 +510,9 @@ gpt-engine: {chat_engine_status}
             await interaction.followup.send(f"Error rendering math: {str(e)}")
 
     try:
-        # Add the Meme cog
+        # Add the cogs
         asyncio.run(client.add_cog(Meme(client)))
+        asyncio.run(client.add_cog(ContextCommands(client)))
         
         TOKEN = os.getenv("DISCORD_BOT_TOKEN")
         client.run(TOKEN)
