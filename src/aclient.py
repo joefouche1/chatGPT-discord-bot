@@ -79,7 +79,7 @@ class aclient(commands.Bot):
 
         self.openAI_API_key = os.getenv("OPENAI_API_KEY")
         self.openAI_gpt_engine = os.getenv("GPT_ENGINE", "gpt-5")
-        self.temperature = 1 # expected by gpt5
+        self.temperature = 1.0 # expected by gpt5
         self.client = AsyncOpenAI()
 
         config_dir = os.path.abspath(f"{__file__}/../../")
@@ -365,7 +365,7 @@ class aclient(commands.Bot):
             max_output_tokens=10000
         )
 
-        reply = completion.output
+        reply = getattr(completion, "output_text", None) or getattr(completion, "output", "")
 
         # Add assistant's reply to history
         async with self.history_lock:
@@ -468,19 +468,30 @@ class aclient(commands.Bot):
         if self.conversation_history is None:
             logger.warning("No history is set!")
 
+        formatted_input = self._format_history_for_responses()
+        logger.info(f"Sending to API - Input length: {len(formatted_input)}")
+        logger.info(f"Input preview: {formatted_input[:200]}...")
+
         # Initialize the chat models with the conversation history
         stream = await self.client.responses.create(
             model=engine,
             instructions=self.starting_prompt,
-            input=self._format_history_for_responses(),
+            input=formatted_input,
             temperature=self.temperature,
             max_output_tokens=4000,
             stream=True
         )
 
         async for event in stream:
-            if event.type == 'content.text.delta':
-                yield event.text
+            event_type = getattr(event, "type", "")
+            if event_type in ("response.output_text.delta", "content.text.delta"):
+                text_delta = getattr(event, "delta", None)
+                if not text_delta:
+                    text_delta = getattr(event, "text", "")
+                if text_delta:
+                    yield text_delta
+            elif event_type in ("response.output_text.done", "content.text.done", "response.completed"):
+                continue
 
     async def process_messages(self):
         while True:
@@ -670,7 +681,7 @@ class aclient(commands.Bot):
             max_output_tokens=1000
         )
 
-        response = completion.output
+        response = getattr(completion, "output_text", None) or getattr(completion, "output", "")
 
         # Add the response to conversation history
         self.conversation_history.append({

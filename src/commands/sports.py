@@ -63,11 +63,12 @@ async def parse_sports_query(query: str, client):
         {"role": "user", "content": query}
     ]
     
-    completion = await client.chat.completions.create(
+    completion = await client.responses.create(
         model="gpt-5",
-        messages=messages
+        instructions=messages[0]["content"],
+        input=f"User: {messages[1]['content']}"
     )
-    response = completion.choices[0].message.content
+    response = getattr(completion, "output_text", None) or getattr(completion, "output", "")
     
     # Clean up the response in case there's any extra text
     json_str = response.strip()
@@ -249,11 +250,12 @@ async def get_sports_score(query: str, client=None, live=False) -> str:
             {"role": "user", "content": f"Scores: {json.dumps(scores)}"}
         ]
         
-        completion = await client.chat.completions.create(
+        completion = await client.responses.create(
             model="gpt-5",
-            messages=messages
+            instructions=system_prompt,
+            input=f"User: Scores: {json.dumps(scores)}"
         )
-        return completion.choices[0].message.content
+        return getattr(completion, "output_text", None) or getattr(completion, "output", "")
         
     except Exception as e:
         logger.error(f"Failed to get sports score: {e}")
