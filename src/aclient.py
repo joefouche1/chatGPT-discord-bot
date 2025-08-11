@@ -349,11 +349,17 @@ class aclient(commands.Bot):
         await self.__truncate_conversation()
 
         # Format multimodal input for Responses API
-        # Use cached image URL for API calls as well
+        # Wrap content under a single user message per current schema
+        combined_text = f"{self._format_history_for_responses()}\n\nUser: {user_message}"
         multimodal_input = [
-            {"type": "input_text", "text": self._format_history_for_responses()},
-            {"type": "input_text", "text": f"\n\nUser: {user_message}"},
-            {"type": "input_image", "image_url": cached_img_url}
+            {
+                "type": "message",
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": combined_text},
+                    {"type": "input_image", "image_url": cached_img_url}
+                ]
+            }
         ]
 
         # Use GPT-5 for image understanding while preserving context
