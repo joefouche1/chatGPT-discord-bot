@@ -145,6 +145,23 @@ class aclient(commands.Bot):
         
         return "\n\n".join(formatted_parts)
 
+    async def _maintain_typing(self, channel):
+        """
+        Maintain typing indicator for as long as needed.
+        Discord's typing indicator automatically stops after ~10 seconds, so we need to keep refreshing it.
+        """
+        try:
+            while True:
+                await channel.trigger_typing()
+                # Wait 8 seconds before refreshing (typing lasts ~10 seconds)
+                await asyncio.sleep(8)
+        except asyncio.CancelledError:
+            # This is expected when we cancel the task
+            logger.debug("Typing maintenance cancelled")
+            raise
+        except Exception as e:
+            logger.warning(f"Error maintaining typing indicator: {e}")
+
     async def cache_discord_image(self, image_url: str) -> str:
         """
         Downloads and caches a Discord image as a low-resolution base64 data URL.
@@ -517,6 +534,14 @@ class aclient(commands.Bot):
         guild_name = getattr(message.guild, 'name', None) if message.guild else None
         await self.conversation_manager.get_or_create_context(channel_id, channel_name, guild_name)
         
+        # Start typing indicator
+        typing_task = None
+        try:
+            # Start typing indicator (it will automatically stop after ~10 seconds, so we need to keep it alive)
+            typing_task = asyncio.create_task(self._maintain_typing(response_channel))
+        except Exception as e:
+            logger.warning(f"Failed to start typing indicator: {e}")
+        
         try:
             # Check if the message has any attachments
             if message.attachments:
@@ -576,6 +601,15 @@ class aclient(commands.Bot):
         except Exception as e:
             logger.exception(f"Error while sending : {e}")
             await response_channel.send(f"> **ERROR: Something went wrong.** \n ```ERROR MESSAGE: {e}```")
+        finally:
+            # Ensure typing indicator is stopped
+            if typing_task and not typing_task.done():
+                typing_task.cancel()
+                try:
+                    await typing_task
+                except asyncio.CancelledError:
+                    pass
+                logger.debug("Typing indicator stopped")
 
     async def draw(self, prompt) -> list[str]:
         """Generate image using DALL-E model"""

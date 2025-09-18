@@ -451,6 +451,15 @@ gpt-engine: {chat_engine_status}
                 logger.info(f"\x1b[31m{message.author}\x1b[0m : '{user_message}' ({message.channel})")
                 # Mark this message as processed with current timestamp
                 processed_messages[message.id] = current_time
+                
+                # Add pig emoji reaction to show we're processing
+                try:
+                    await message.add_reaction("🐷")
+                except discord.errors.Forbidden:
+                    logger.warning(f"Unable to add reaction to message {message.id} - missing permissions")
+                except Exception as e:
+                    logger.warning(f"Failed to add pig reaction: {e}")
+                
                 await client.enqueue_message(message, user_message)
             
         except Exception as e:
