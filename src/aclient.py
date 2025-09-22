@@ -221,19 +221,22 @@ class aclient(commands.Bot):
             logger.error(f"Error caching image {image_url}: {e}")
             return image_url  # Fallback to original URL
 
-    async def handle_response(self, message: discord.Message = None, channel_id: str = None) -> str:
+    async def handle_response(self, user_message: str = None, channel_id: str = None, discord_message: discord.Message = None) -> str:
         """
         Handles the response from the chatbot model and adds it to the conversation history.
         """
         response = ""
         spoke = False
         spoke2 = False
+        brain_reaction_added = False
+        start_time = asyncio.get_event_loop().time()
 
-        async_generator = self.ask_stream_async(message, channel_id)
+        async_generator = self.ask_stream_async(user_message, channel_id)
         try:
             while True:
                 try:
-                    token = await asyncio.wait_for(async_generator.__anext__(), timeout=40)
+                    # Use 30-second chunks to check for progress
+                    token = await asyncio.wait_for(async_generator.__anext__(), timeout=30)
                     if token is not None:
                         response += token
                         if len(response) > 0 and not spoke:
@@ -243,11 +246,48 @@ class aclient(commands.Bot):
                         elif len(response) % 500 > 0 and spoke and (not spoke2):
                             logger.info(f"Response is up to {len(response)}")
                             spoke2 = True
+                except asyncio.TimeoutError:
+                    elapsed_time = asyncio.get_event_loop().time() - start_time
+
+                    # After 30 seconds without response, add brain emoji reaction
+                    if not brain_reaction_added and not spoke and discord_message:
+                        try:
+                            await discord_message.add_reaction("🧠")
+                            brain_reaction_added = True
+                            logger.info("Added brain emoji reaction after 30 seconds of processing")
+                        except Exception as e:
+                            logger.warning(f"Could not add brain emoji reaction: {e}")
+
+                    # After 3 minutes total, give up
+                    if elapsed_time >= 180:
+                        logger.error(f"Response timed out after {elapsed_time:.1f} seconds")
+                        # Remove brain emoji if it was added
+                        if brain_reaction_added and discord_message:
+                            try:
+                                await discord_message.remove_reaction("🧠", self.user)
+                            except Exception:
+                                pass
+                        return "⚠️ **Request timed out**: The model took longer than 3 minutes to respond. This might be due to high load on reasoning models. Please try again or use a simpler query."
+
+                    # Continue waiting
+                    continue
                 except StopAsyncIteration:
                     break
-        except asyncio.TimeoutError:
-            logger.warning(
-                "handle_response took over 40 seconds with no reply.")
+        except Exception as e:
+            logger.error(f"Unexpected error in handle_response: {e}")
+            if brain_reaction_added and discord_message:
+                try:
+                    await discord_message.remove_reaction("🧠", self.user)
+                except Exception:
+                    pass
+            raise
+
+        # Remove brain emoji reaction if response completed successfully
+        if brain_reaction_added and discord_message:
+            try:
+                await discord_message.remove_reaction("🧠", self.user)
+            except Exception:
+                pass
 
         # Check for LaTeX expressions and process them
         if response and "\\begin{" in response or "\\frac" in response or "\\text" in response:
@@ -557,7 +597,7 @@ class aclient(commands.Bot):
                 else:
                     response_prefix = ""
 
-                model_out = await self.handle_response(user_message, channel_id)
+                model_out = await self.handle_response(user_message=user_message, channel_id=channel_id, discord_message=message)
                 
                 # Only send a message if model_out is not None
                 if model_out is not None:
@@ -686,7 +726,7 @@ class aclient(commands.Bot):
                         "content": "Hello! I'm starting up the bot. Please introduce yourself and let me know you're ready to help."
                     })
                     
-                    response = await self.handle_response(None, channel_id)
+                    response = await self.handle_response(user_message=None, channel_id=channel_id, discord_message=None)
                     if response and len(response) > 0:
                         await channel.send(response)
                     logger.info(f"System prompt response:{response}")
