@@ -506,7 +506,7 @@ class aclient(commands.Bot):
             temperature=self.temperature,
             max_output_tokens=10000,
             text={"format": {"type": "text"}},  # Explicitly request text output
-            reasoning_effort="medium"
+            reasoning={"effort": "medium"}
         )
 
         reply = getattr(completion, "output_text", None) or getattr(completion, "output", "")
@@ -620,7 +620,7 @@ class aclient(commands.Bot):
             temperature=self.temperature,
             max_output_tokens=10000,  # Increased from 4000 to allow for reasoning + output
             text={"format": {"type": "text"}},  # Explicitly request text output
-            reasoning_effort="medium",  # Can be "low", "medium", or "high"
+            reasoning={"effort": "medium"},  # Can be "minimal", "low", "medium", "high"
             stream=True
         )
 
@@ -754,7 +754,7 @@ class aclient(commands.Bot):
                 temperature=self.temperature,
                 max_output_tokens=1000,  # Increased for GPT-5 reasoning
                 text={"format": {"type": "text"}},  # Explicitly request text output
-                reasoning_effort="low"  # Simple task, use low reasoning
+                reasoning={"effort": "low"}  # Simple task
             )
             
             # Get the refined prompt
@@ -853,7 +853,7 @@ class aclient(commands.Bot):
             temperature=self.temperature,
             max_output_tokens=8000,  # Increased from 1000 to allow for reasoning + output
             text={"format": {"type": "text"}},  # Explicitly request text output
-            reasoning_effort="medium"
+            reasoning={"effort": "medium"}
         )
 
         response = getattr(completion, "output_text", None) or getattr(completion, "output", "")

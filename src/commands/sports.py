@@ -69,7 +69,7 @@ async def parse_sports_query(query: str, client):
         input=f"User: {messages[1]['content']}",
         max_output_tokens=2000,  # Sufficient for parsing task
         text={"format": {"type": "text"}},  # Explicitly request text output
-        reasoning_effort="low"  # Simple parsing task
+        reasoning={"effort": "low"}  # Simple parsing task
     )
     response = getattr(completion, "output_text", None) or getattr(completion, "output", "")
     
@@ -259,7 +259,7 @@ async def get_sports_score(query: str, client=None, live=False) -> str:
             input=f"User: Scores: {json.dumps(scores)}",
             max_output_tokens=4000,  # Sufficient for sports summaries
             text={"format": {"type": "text"}},  # Explicitly request text output
-            reasoning_effort="low"  # Simple formatting task
+            reasoning={"effort": "low"}  # Simple formatting task
         )
         return getattr(completion, "output_text", None) or getattr(completion, "output", "")
         
