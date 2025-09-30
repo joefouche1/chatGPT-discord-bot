@@ -152,9 +152,22 @@ class aclient(commands.Bot):
         """
         try:
             while True:
-                await channel.trigger_typing()
+                # Use typing() method if trigger_typing doesn't exist
+                try:
+                    if hasattr(channel, 'trigger_typing'):
+                        await channel.trigger_typing()
+                    elif hasattr(channel, 'typing'):
+                        async with channel.typing():
+                            await asyncio.sleep(8)
+                    else:
+                        logger.warning("Channel doesn't support typing indicators")
+                        break
+                except AttributeError:
+                    logger.warning("Channel doesn't support typing indicators")
+                    break
                 # Wait 8 seconds before refreshing (typing lasts ~10 seconds)
-                await asyncio.sleep(8)
+                if hasattr(channel, 'trigger_typing'):
+                    await asyncio.sleep(8)
         except asyncio.CancelledError:
             # This is expected when we cancel the task
             logger.debug("Typing maintenance cancelled")
@@ -230,36 +243,60 @@ class aclient(commands.Bot):
         spoke2 = False
         brain_reaction_added = False
         start_time = asyncio.get_event_loop().time()
+        last_token_time = start_time
 
         async_generator = self.ask_stream_async(user_message, channel_id)
+
+        # Background task to add brain emoji after 30 seconds
+        async def add_brain_emoji_after_delay():
+            await asyncio.sleep(30)
+            if not spoke and discord_message and not brain_reaction_added:
+                try:
+                    await discord_message.add_reaction("🧠")
+                    logger.info("Added brain emoji reaction after 30 seconds of processing")
+                    return True
+                except Exception as e:
+                    logger.warning(f"Could not add brain emoji reaction: {e}")
+            return False
+
+        brain_emoji_task = asyncio.create_task(add_brain_emoji_after_delay())
+
         try:
             while True:
                 try:
-                    # Use 30-second chunks to check for progress
-                    token = await asyncio.wait_for(async_generator.__anext__(), timeout=30)
+                    # Use different timeouts depending on whether we've received tokens
+                    # First token: 120 seconds (for reasoning models)
+                    # Subsequent tokens: 60 seconds (stream should be flowing)
+                    timeout = 120 if not spoke else 60
+
+                    token = await asyncio.wait_for(async_generator.__anext__(), timeout=timeout)
+
                     if token is not None:
                         response += token
+                        last_token_time = asyncio.get_event_loop().time()
+
                         if len(response) > 0 and not spoke:
-                            logger.info(
-                                f"Response has started with: {response}")
+                            logger.info(f"Response has started with: {response}")
                             spoke = True
+                            # Cancel brain emoji task if we got a response
+                            if not brain_emoji_task.done():
+                                brain_emoji_task.cancel()
                         elif len(response) % 500 > 0 and spoke and (not spoke2):
                             logger.info(f"Response is up to {len(response)}")
                             spoke2 = True
+
                 except asyncio.TimeoutError:
                     elapsed_time = asyncio.get_event_loop().time() - start_time
 
-                    # After 30 seconds without response, add brain emoji reaction
-                    if not brain_reaction_added and not spoke and discord_message:
+                    # Check if brain emoji was added by background task
+                    if brain_emoji_task.done() and not brain_reaction_added:
                         try:
-                            await discord_message.add_reaction("🧠")
-                            brain_reaction_added = True
-                            logger.info("Added brain emoji reaction after 30 seconds of processing")
-                        except Exception as e:
-                            logger.warning(f"Could not add brain emoji reaction: {e}")
+                            brain_reaction_added = await brain_emoji_task
+                        except:
+                            pass
 
-                    # After 3 minutes total, give up
-                    if elapsed_time >= 180:
+                    # After 5 minutes total, give up
+                    if elapsed_time >= 300:
                         logger.error(f"Response timed out after {elapsed_time:.1f} seconds")
                         # Remove brain emoji if it was added
                         if brain_reaction_added and discord_message:
@@ -267,20 +304,40 @@ class aclient(commands.Bot):
                                 await discord_message.remove_reaction("🧠", self.user)
                             except Exception:
                                 pass
-                        return "⚠️ **Request timed out**: The model took longer than 3 minutes to respond. This might be due to high load on reasoning models. Please try again or use a simpler query."
+                        return "⚠️ **Request timed out**: The model took longer than 5 minutes to respond. This might be due to high load on reasoning models. Please try again or use a simpler query."
+
+                    # If we've been waiting too long for first token, log it
+                    if not spoke:
+                        logger.warning(f"Still waiting for first token after {elapsed_time:.1f} seconds")
+                    else:
+                        logger.warning(f"Token stream stalled after {elapsed_time:.1f} seconds")
 
                     # Continue waiting
                     continue
+
                 except StopAsyncIteration:
                     break
+
         except Exception as e:
             logger.error(f"Unexpected error in handle_response: {e}")
+            # Cancel brain emoji task
+            if not brain_emoji_task.done():
+                brain_emoji_task.cancel()
+            # Remove brain emoji if it was added
             if brain_reaction_added and discord_message:
                 try:
                     await discord_message.remove_reaction("🧠", self.user)
                 except Exception:
                     pass
             raise
+        finally:
+            # Make sure brain emoji task is cancelled
+            if not brain_emoji_task.done():
+                brain_emoji_task.cancel()
+                try:
+                    await brain_emoji_task
+                except asyncio.CancelledError:
+                    pass
 
         # Remove brain emoji reaction if response completed successfully
         if brain_reaction_added and discord_message:
@@ -288,6 +345,36 @@ class aclient(commands.Bot):
                 await discord_message.remove_reaction("🧠", self.user)
             except Exception:
                 pass
+
+        # Check if brain emoji task completed
+        if brain_emoji_task.done() and not brain_reaction_added:
+            try:
+                brain_reaction_added = await brain_emoji_task
+                # Remove it if it was added
+                if brain_reaction_added and discord_message:
+                    try:
+                        await discord_message.remove_reaction("🧠", self.user)
+                    except Exception:
+                        pass
+            except asyncio.CancelledError:
+                pass
+
+        # Check if we got an empty response
+        if not response or len(response.strip()) == 0:
+            elapsed_time = asyncio.get_event_loop().time() - start_time
+            logger.error(f"Received empty response after {elapsed_time:.1f} seconds")
+            return (
+                "⚠️ **Empty Response Received**\n\n"
+                "The model returned an empty response. This can happen when:\n"
+                "• The model is still thinking but the stream ended prematurely\n"
+                "• The API encountered an internal error\n"
+                "• The response was filtered by content policies\n"
+                f"• Stream ran for {elapsed_time:.1f} seconds before ending\n\n"
+                "Please try:\n"
+                "1. Rephrasing your question\n"
+                "2. Breaking complex queries into simpler parts\n"
+                "3. Waiting a moment and trying again"
+            )
 
         # Check for LaTeX expressions and process them
         if response and "\\begin{" in response or "\\frac" in response or "\\text" in response:
