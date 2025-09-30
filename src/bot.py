@@ -21,6 +21,7 @@ from src.commands.sports import get_sports_score, format_sports_response  # Assu
 from src.commands.actions import ACTION_CODES, process_action_code
 from src.commands.meme import Meme
 from src.commands.context import ContextCommands
+from src.commands.game_notifications import GameNotificationManager
 
 import sys
 import fcntl
@@ -31,6 +32,9 @@ session = requests_cache.CachedSession('hogcache', expire_after=360)
 
 # Instantiate the main client object
 client = aclient()
+
+# Initialize game notification manager
+game_notifier = GameNotificationManager(client)
 
 # Track processed message IDs to prevent duplicate processing
 # Store message IDs with timestamps to auto-cleanup old entries
@@ -113,6 +117,7 @@ def run_discord_bot():
         await client.send_start_prompt()
         loop = asyncio.get_event_loop()
         loop.create_task(client.process_messages())
+        loop.create_task(game_notifier.start_monitoring())
         logger.info(
             f'{client.user} is now running! listening on {client.replying_all_discord_channel_ids}')
 
@@ -517,6 +522,123 @@ gpt-engine: {chat_engine_status}
         except Exception as e:
             logger.error(f"Error rendering math: {e}")
             await interaction.followup.send(f"Error rendering math: {str(e)}")
+
+    @client.tree.command(name="gamenotify", description="Subscribe to game start notifications for a team")
+    async def gamenotify(interaction: discord.Interaction, team_name: str, league: str, lead_time: int = 30):
+        """
+        Subscribe to game notifications
+
+        Args:
+            team_name: Team name (e.g., "Boise State", "Ohio State", "Bengals")
+            league: League code (ncaaf, nfl, nba, mlb, nhl, etc.)
+            lead_time: Minutes before game to notify (default 30)
+        """
+        await interaction.response.defer(ephemeral=False)
+
+        # Validate league
+        valid_leagues = ["ncaaf", "nfl", "nba", "mlb", "nhl", "wnba", "ncaab"]
+        if league.lower() not in valid_leagues:
+            await interaction.followup.send(
+                f"❌ Invalid league. Valid options: {', '.join(valid_leagues)}"
+            )
+            return
+
+        # Validate lead time
+        if lead_time < 5 or lead_time > 180:
+            await interaction.followup.send(
+                "❌ Lead time must be between 5 and 180 minutes"
+            )
+            return
+
+        channel_id = str(interaction.channel_id)
+        success = game_notifier.add_subscription(channel_id, team_name, league, lead_time)
+
+        if success:
+            embed = discord.Embed(
+                title="✅ Game Notifications Enabled",
+                description=f"You'll be notified in this channel when **{team_name}** games are starting!",
+                color=discord.Color.green()
+            )
+            embed.add_field(name="Team", value=team_name, inline=True)
+            embed.add_field(name="League", value=league.upper(), inline=True)
+            embed.add_field(name="Lead Time", value=f"{lead_time} minutes", inline=True)
+            embed.set_footer(text="Notifications will be checked every 15 minutes")
+            await interaction.followup.send(embed=embed)
+            logger.info(f"Subscription added: {team_name} ({league}) in channel {channel_id} by {interaction.user}")
+        else:
+            await interaction.followup.send(
+                f"⚠️ You're already subscribed to **{team_name}** notifications in this channel."
+            )
+
+    @client.tree.command(name="gameunsubscribe", description="Unsubscribe from team game notifications")
+    async def gameunsubscribe(interaction: discord.Interaction, team_name: str, league: str):
+        """
+        Unsubscribe from game notifications
+
+        Args:
+            team_name: Team name to unsubscribe from
+            league: League code
+        """
+        await interaction.response.defer(ephemeral=False)
+
+        channel_id = str(interaction.channel_id)
+        success = game_notifier.remove_subscription(channel_id, team_name, league)
+
+        if success:
+            embed = discord.Embed(
+                title="🔕 Unsubscribed",
+                description=f"Game notifications for **{team_name}** ({league.upper()}) have been disabled in this channel.",
+                color=discord.Color.blue()
+            )
+            await interaction.followup.send(embed=embed)
+            logger.info(f"Subscription removed: {team_name} ({league}) from channel {channel_id} by {interaction.user}")
+        else:
+            await interaction.followup.send(
+                f"❌ No active subscription found for **{team_name}** ({league.upper()}) in this channel."
+            )
+
+    @client.tree.command(name="gamesubscriptions", description="List all game notification subscriptions for this channel")
+    async def gamesubscriptions(interaction: discord.Interaction):
+        """List all active subscriptions in this channel"""
+        await interaction.response.defer(ephemeral=False)
+
+        channel_id = str(interaction.channel_id)
+        subs = game_notifier.get_channel_subscriptions(channel_id)
+
+        if not subs:
+            await interaction.followup.send(
+                "📭 No active game notification subscriptions in this channel.\n"
+                "Use `/gamenotify` to subscribe to a team!"
+            )
+            return
+
+        embed = discord.Embed(
+            title="🔔 Active Game Notifications",
+            description=f"Subscriptions for this channel:",
+            color=discord.Color.gold()
+        )
+
+        for sub in subs:
+            team = sub['team']
+            league = sub['league'].upper()
+            lead_time = sub.get('lead_time_minutes', 30)
+            added = sub.get('added_at', 'Unknown')
+
+            # Parse date if available
+            try:
+                added_date = datetime.fromisoformat(added)
+                added_str = added_date.strftime("%Y-%m-%d %H:%M")
+            except:
+                added_str = added
+
+            embed.add_field(
+                name=f"{team} ({league})",
+                value=f"⏰ {lead_time} min notice\n📅 Added: {added_str}",
+                inline=False
+            )
+
+        embed.set_footer(text="Use /gameunsubscribe to remove a subscription")
+        await interaction.followup.send(embed=embed)
 
     try:
         # Add the cogs
