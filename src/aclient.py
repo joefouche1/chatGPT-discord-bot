@@ -504,7 +504,9 @@ class aclient(commands.Bot):
             instructions=self.starting_prompt,
             input=multimodal_input,
             temperature=self.temperature,
-            max_output_tokens=10000
+            max_output_tokens=10000,
+            text={"format": {"type": "text"}},  # Explicitly request text output
+            reasoning_effort="medium"
         )
 
         reply = getattr(completion, "output_text", None) or getattr(completion, "output", "")
@@ -610,12 +612,15 @@ class aclient(commands.Bot):
         logger.info(f"Input preview: {formatted_input[:200]}...")
 
         # Initialize the chat models with the conversation history
+        # Use higher token limit for GPT-5 to accommodate reasoning tokens
         stream = await self.client.responses.create(
             model=engine,
             instructions=self.starting_prompt,
             input=formatted_input,
             temperature=self.temperature,
-            max_output_tokens=4000,
+            max_output_tokens=10000,  # Increased from 4000 to allow for reasoning + output
+            text={"format": {"type": "text"}},  # Explicitly request text output
+            reasoning_effort="medium",  # Can be "low", "medium", or "high"
             stream=True
         )
 
@@ -747,7 +752,9 @@ class aclient(commands.Bot):
                 instructions="You are a helpful image prompt engineer. Your task is to enhance the user's image prompt to create the best DALL-E image possible. Return only the enhanced prompt without any explanations or additional text.",
                 input=f"Enhance this image prompt for DALL-E: {prompt}",
                 temperature=self.temperature,
-                max_output_tokens=500
+                max_output_tokens=1000,  # Increased for GPT-5 reasoning
+                text={"format": {"type": "text"}},  # Explicitly request text output
+                reasoning_effort="low"  # Simple task, use low reasoning
             )
             
             # Get the refined prompt
@@ -844,7 +851,9 @@ class aclient(commands.Bot):
             instructions=self.starting_prompt,
             input=await self._format_history_for_responses(channel_id),
             temperature=self.temperature,
-            max_output_tokens=1000
+            max_output_tokens=8000,  # Increased from 1000 to allow for reasoning + output
+            text={"format": {"type": "text"}},  # Explicitly request text output
+            reasoning_effort="medium"
         )
 
         response = getattr(completion, "output_text", None) or getattr(completion, "output", "")
