@@ -17,8 +17,8 @@ async def ask_and_print():
         input="What is the diameter of an ozone molecule?",
         stream=True,
         max_output_tokens=1000,
-        reasoning={"effort": "low"},
-        parameters={"verbosity": "low"}
+        text={"verbosity": "low"},
+        reasoning={"effort": "low"}
     )
     
     # Process streaming events

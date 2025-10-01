@@ -67,10 +67,9 @@ async def parse_sports_query(query: str, client):
         model="gpt-5",
         instructions=messages[0]["content"],
         input=f"User: {messages[1]['content']}",
-        max_output_tokens=2000,  # Sufficient for parsing task
-        text={"format": {"type": "text"}},  # Explicitly request text output
-        reasoning={"effort": "low"},  # Simple parsing task
-        parameters={"verbosity": "low"}  # Simple parsing doesn't need verbose output
+        max_output_tokens=2000,
+        text={"format": {"type": "text"}, "verbosity": "low"},
+        reasoning={"effort": "low"}
     )
     response = getattr(completion, "output_text", None) or getattr(completion, "output", "")
     
@@ -258,10 +257,9 @@ async def get_sports_score(query: str, client=None, live=False) -> str:
             model="gpt-5",
             instructions=system_prompt,
             input=f"User: Scores: {json.dumps(scores)}",
-            max_output_tokens=4000,  # Sufficient for sports summaries
-            text={"format": {"type": "text"}},  # Explicitly request text output
-            reasoning={"effort": "low"},  # Simple formatting task
-            parameters={"verbosity": "low"}  # Sports summaries don't need verbose output
+            max_output_tokens=4000,
+            text={"format": {"type": "text"}, "verbosity": "low"},
+            reasoning={"effort": "low"}
         )
         return getattr(completion, "output_text", None) or getattr(completion, "output", "")
         

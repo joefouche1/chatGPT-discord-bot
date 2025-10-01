@@ -580,9 +580,8 @@ class aclient(commands.Bot):
             input=multimodal_input,
             temperature=self.temperature,
             max_output_tokens=10000,
-            text={"format": {"type": "text"}},  # Explicitly request text output
-            reasoning={"effort": gpt5_params["reasoning_effort"]},
-            parameters={"verbosity": gpt5_params["verbosity"]}
+            text={"format": {"type": "text"}, "verbosity": gpt5_params["verbosity"]},
+            reasoning={"effort": gpt5_params["reasoning_effort"]}
         )
 
         reply = getattr(completion, "output_text", None) or getattr(completion, "output", "")
@@ -696,9 +695,8 @@ class aclient(commands.Bot):
             input=formatted_input,
             temperature=self.temperature,
             max_output_tokens=10000,  # Increased from 4000 to allow for reasoning + output
-            text={"format": {"type": "text"}},  # Explicitly request text output
+            text={"format": {"type": "text"}, "verbosity": gpt5_params["verbosity"]},
             reasoning={"effort": gpt5_params["reasoning_effort"]},
-            parameters={"verbosity": gpt5_params["verbosity"]},
             stream=True
         )
 
@@ -831,10 +829,9 @@ class aclient(commands.Bot):
                 instructions="You are a helpful image prompt engineer. Your task is to enhance the user's image prompt to create the best DALL-E image possible. Return only the enhanced prompt without any explanations or additional text.",
                 input=f"Enhance this image prompt for DALL-E: {prompt}",
                 temperature=self.temperature,
-                max_output_tokens=1000,  # Increased for GPT-5 reasoning
-                text={"format": {"type": "text"}},  # Explicitly request text output
-                reasoning={"effort": "low"},  # Simple task, always use low
-                parameters={"verbosity": "low"}  # Always use low verbosity for prompt enhancement
+                max_output_tokens=1000,
+                text={"format": {"type": "text"}, "verbosity": "low"},
+                reasoning={"effort": "low"}
             )
             
             # Get the refined prompt
@@ -938,9 +935,8 @@ class aclient(commands.Bot):
             input=await self._format_history_for_responses(channel_id),
             temperature=self.temperature,
             max_output_tokens=8000,  # Increased from 1000 to allow for reasoning + output
-            text={"format": {"type": "text"}},  # Explicitly request text output
-            reasoning={"effort": gpt5_params["reasoning_effort"]},
-            parameters={"verbosity": gpt5_params["verbosity"]}
+            text={"format": {"type": "text"}, "verbosity": gpt5_params["verbosity"]},
+            reasoning={"effort": gpt5_params["reasoning_effort"]}
         )
 
         response = getattr(completion, "output_text", None) or getattr(completion, "output", "")

@@ -74,7 +74,7 @@ multidict==6.6.3
     #   -r requirements.in
     #   aiohttp
     #   yarl
-openai==1.99.6
+openai>=1.99.6
     # via -r requirements.in
 pillow==11.3.0
     # via -r requirements.in
