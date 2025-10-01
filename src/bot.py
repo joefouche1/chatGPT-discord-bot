@@ -131,21 +131,201 @@ def run_discord_bot():
         logger.warning(
             f"\x1b[31m{client.openAI_gpt_engine} bot has been successfully reset for channel {channel_id}\x1b[0m")
 
-    @client.tree.command(name="help", description="Show help for the bot")
+    @client.tree.command(name="help", description="Show comprehensive help for the bot")
     async def help(interaction: discord.Interaction):
         """Command to show help for the bot."""
         await interaction.response.defer(ephemeral=False)
-        await interaction.followup.send(""":star: **BASIC COMMANDS** \n
-        - `/chat [message]` Chat with ChatGPT!
 
+        help_embed = discord.Embed(
+            title="🐷 Megapig Bot - Command Reference",
+            description="Your AI-powered assistant for conversations, sports, news, images, and more!",
+            color=discord.Color.blue()
+        )
 
-        - `/private` ChatGPT switch to private mode
-        - `/public` ChatGPT switch to public mode
-        - `/replyall` ChatGPT switch between replyAll mode and default mode
-        - `/reset` Clear ChatGPT conversation history""")
+        # Conversation Commands
+        help_embed.add_field(
+            name="💬 Conversation",
+            value=(
+                "**@Megapig** or mention me - Chat naturally!\n"
+                "**Attach images** - I can see and analyze images\n"
+                "`/reset` - Clear conversation history for this channel\n"
+                "`/info` - Show bot model and configuration"
+            ),
+            inline=False
+        )
+
+        # Sports Commands
+        help_embed.add_field(
+            name="🏈 Sports",
+            value=(
+                "`/sportsscore [query]` - Get game scores\n"
+                "  *Example: `/sportsscore Boise State yesterday`*\n"
+                "`/sportsnow [query]` - Get live game scores\n"
+                "  *Example: `/sportsnow NFL games`*\n"
+                "`/sportsnews [sport]` - Get sports news headlines\n"
+                "  *Sports: nfl, nba, mlb, nhl, ncaaf, ncaab*"
+            ),
+            inline=False
+        )
+
+        # Game Notifications
+        help_embed.add_field(
+            name="🔔 Game Notifications",
+            value=(
+                "`/gamenotify [team] [league] [minutes]` - Subscribe to game alerts\n"
+                "  *Example: `/gamenotify \"Boise State\" ncaaf 30`*\n"
+                "`/gamesubscriptions` - View active subscriptions\n"
+                "`/gameunsubscribe [team] [league]` - Remove subscription\n"
+                "  *Leagues: ncaaf, nfl, nba, mlb, nhl, wnba, ncaab*"
+            ),
+            inline=False
+        )
+
+        # Image & Creative Commands
+        help_embed.add_field(
+            name="🎨 Images & Creative",
+            value=(
+                "`/draw [prompt]` - Generate AI images with DALL-E 3\n"
+                "`/meme [top text] [bottom text]` - Create meme images\n"
+                "`/math [latex]` - Render mathematical expressions\n"
+                "  *Example: `/math x = \\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}`*"
+            ),
+            inline=False
+        )
+
+        # News & Information
+        help_embed.add_field(
+            name="📰 News & Information",
+            value=(
+                "`/pignews` - Random pig/bacon related news\n"
+                "`/magic8ball [question]` - Ask the magic 8-ball"
+            ),
+            inline=False
+        )
+
+        # AI Action Codes
+        help_embed.add_field(
+            name="🤖 AI Action Codes",
+            value=(
+                "The bot can trigger these actions when needed:\n"
+                "`!SPORTS [query]` - Fetch sports scores\n"
+                "`!WEATHER [city]` - Get weather information\n"
+                "`!NEWS [topic]` - Search news articles\n"
+                "`!DRAW [prompt]` - Generate an image\n"
+                "*Just ask naturally and I'll use these when appropriate!*"
+            ),
+            inline=False
+        )
+
+        # Special Features
+        help_embed.add_field(
+            name="✨ Special Features",
+            value=(
+                "• **Per-Channel Memory** - I remember our conversation in each channel\n"
+                "• **Image Understanding** - Attach images and ask questions about them\n"
+                "• **Streaming Responses** - Real-time message streaming\n"
+                "• **LaTeX Rendering** - Automatic math formula rendering\n"
+                "• **Context Commands** - Use `/context` for memory management"
+            ),
+            inline=False
+        )
+
+        # Admin Commands
+        help_embed.add_field(
+            name="⚙️ Admin & Setup",
+            value=(
+                "`/synccommands` - Force sync commands to this server (instant)\n"
+                "`/testmention` - Test bot mention handling"
+            ),
+            inline=False
+        )
+
+        help_embed.set_footer(text="Powered by GPT-5 • Created for the Fouché family")
+
+        await interaction.followup.send(embed=help_embed)
 
         logger.info(
-            "\x1b[31mSomeone needs help!\x1b[0m")
+            f"\x1b[31m{interaction.user} requested help!\x1b[0m")
+
+    @client.tree.command(name="synccommands", description="Force sync slash commands to this server (admin)")
+    async def synccommands(interaction: discord.Interaction):
+        """Force sync commands to the current guild for immediate availability."""
+        await interaction.response.defer(ephemeral=True)
+
+        try:
+            # Sync to current guild for immediate availability
+            guild = interaction.guild
+            if guild:
+                client.tree.copy_global_to(guild=guild)
+                await client.tree.sync(guild=guild)
+                await interaction.followup.send(
+                    f"✅ Commands synced to **{guild.name}**!\n"
+                    "All slash commands should now be available immediately.",
+                    ephemeral=True
+                )
+                logger.info(f"Commands synced to guild {guild.name} ({guild.id}) by {interaction.user}")
+            else:
+                await interaction.followup.send(
+                    "❌ This command must be used in a server, not in DMs.",
+                    ephemeral=True
+                )
+        except Exception as e:
+            logger.error(f"Error syncing commands: {e}")
+            await interaction.followup.send(
+                f"❌ Error syncing commands: {str(e)}",
+                ephemeral=True
+            )
+
+    @client.tree.command(name="gpt5settings", description="Configure GPT-5 verbosity and reasoning effort")
+    @app_commands.describe(
+        verbosity="Response verbosity: low, medium, or high",
+        reasoning="Reasoning effort: minimal, low, medium, or high"
+    )
+    @app_commands.choices(verbosity=[
+        app_commands.Choice(name="Low", value="low"),
+        app_commands.Choice(name="Medium", value="medium"),
+        app_commands.Choice(name="High", value="high"),
+    ])
+    @app_commands.choices(reasoning=[
+        app_commands.Choice(name="Minimal", value="minimal"),
+        app_commands.Choice(name="Low", value="low"),
+        app_commands.Choice(name="Medium", value="medium"),
+        app_commands.Choice(name="High", value="high"),
+    ])
+    async def gpt5settings(
+        interaction: discord.Interaction,
+        verbosity: app_commands.Choice[str] = None,
+        reasoning: app_commands.Choice[str] = None
+    ):
+        """Configure GPT-5 parameters for this channel."""
+        await interaction.response.defer(ephemeral=False)
+
+        channel_id = str(interaction.channel_id)
+
+        # If no parameters provided, show current settings
+        if verbosity is None and reasoning is None:
+            current = client.get_gpt5_params(channel_id)
+            await interaction.followup.send(
+                f"**Current GPT-5 settings for this channel:**\n"
+                f"• Verbosity: `{current['verbosity']}`\n"
+                f"• Reasoning effort: `{current['reasoning_effort']}`\n\n"
+                f"To change: `/gpt5settings verbosity:low reasoning:minimal`"
+            )
+            return
+
+        # Update settings
+        verbosity_val = verbosity.value if verbosity else None
+        reasoning_val = reasoning.value if reasoning else None
+
+        client.set_gpt5_params(channel_id, verbosity_val, reasoning_val)
+        current = client.get_gpt5_params(channel_id)
+
+        await interaction.followup.send(
+            f"✅ **GPT-5 settings updated for this channel:**\n"
+            f"• Verbosity: `{current['verbosity']}`\n"
+            f"• Reasoning effort: `{current['reasoning_effort']}`"
+        )
+        logger.info(f"{interaction.user} updated GPT-5 settings in channel {channel_id}: {current}")
 
     @client.tree.command(name="info", description="Bot information")
     async def info(interaction: discord.Interaction):

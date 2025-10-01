@@ -13,7 +13,9 @@ async def test_api():
         stream=True,
         max_output_tokens=1000,
         instructions="You are a helpful assistant.",
-        input="Oink oink! What's the diameter of the average avocado?"
+        input="Oink oink! What's the diameter of the average avocado?",
+        reasoning={"effort": "low"},
+        parameters={"verbosity": "low"}
     )
 
     async for event in stream:

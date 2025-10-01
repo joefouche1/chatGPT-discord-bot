@@ -277,7 +277,7 @@ class GameNotificationManager:
                             embed = await self.create_game_notification(channel_id, game_info, subscription)
                             if embed:
                                 await channel.send(
-                                    f"🚨 **{team}** game starting in {int(time_until_game)} minutes!",
+                                    f"@here 🚨 **{team}** game starting in {int(time_until_game)} minutes!",
                                     embed=embed
                                 )
                                 self.notified_games.add(game_id)

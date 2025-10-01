@@ -6,6 +6,7 @@ import io
 import re
 import urllib.parse
 import base64
+import json
 from PIL import Image
 
 from utils.log import logger
@@ -109,7 +110,80 @@ class aclient(commands.Bot):
         self.image_cache = {}  # {original_url: base64_data_url}
         self.max_cache_size = 50  # Maximum number of images to cache
 
+        # GPT-5 settings
+        self.gpt5_settings_file = "gpt5_settings.json"
+        self.gpt5_settings = self.load_gpt5_settings()
+
     # init_history methods no longer needed - handled by conversation manager per channel
+
+    def load_gpt5_settings(self):
+        """Load GPT-5 settings from file"""
+        try:
+            if os.path.exists(self.gpt5_settings_file):
+                with open(self.gpt5_settings_file, 'r') as f:
+                    settings = json.load(f)
+                logger.info(f"Loaded GPT-5 settings: {settings}")
+                return settings
+            else:
+                # Default settings
+                default_settings = {
+                    "global": {
+                        "verbosity": "low",
+                        "reasoning_effort": "low"
+                    }
+                }
+                self.save_gpt5_settings(default_settings)
+                return default_settings
+        except Exception as e:
+            logger.error(f"Error loading GPT-5 settings: {e}")
+            return {
+                "global": {
+                    "verbosity": "low",
+                    "reasoning_effort": "low"
+                }
+            }
+
+    def save_gpt5_settings(self, settings):
+        """Save GPT-5 settings to file"""
+        try:
+            with open(self.gpt5_settings_file, 'w') as f:
+                json.dump(settings, f, indent=2)
+            logger.info("Saved GPT-5 settings to file")
+        except Exception as e:
+            logger.error(f"Error saving GPT-5 settings: {e}")
+
+    def get_gpt5_params(self, channel_id: str = None):
+        """Get GPT-5 parameters for a channel or use global defaults"""
+        channel_key = str(channel_id) if channel_id else None
+
+        # Check if channel has specific settings
+        if channel_key and channel_key in self.gpt5_settings:
+            settings = self.gpt5_settings[channel_key]
+        else:
+            settings = self.gpt5_settings.get("global", {
+                "verbosity": "low",
+                "reasoning_effort": "low"
+            })
+
+        return {
+            "verbosity": settings.get("verbosity", "low"),
+            "reasoning_effort": settings.get("reasoning_effort", "low")
+        }
+
+    def set_gpt5_params(self, channel_id: str, verbosity: str = None, reasoning_effort: str = None):
+        """Set GPT-5 parameters for a channel"""
+        channel_key = str(channel_id)
+
+        if channel_key not in self.gpt5_settings:
+            self.gpt5_settings[channel_key] = {}
+
+        if verbosity:
+            self.gpt5_settings[channel_key]["verbosity"] = verbosity
+        if reasoning_effort:
+            self.gpt5_settings[channel_key]["reasoning_effort"] = reasoning_effort
+
+        self.save_gpt5_settings(self.gpt5_settings)
+        logger.info(f"Updated GPT-5 settings for channel {channel_id}: {self.gpt5_settings[channel_key]}")
 
     async def _format_history_for_responses(self, channel_id: str):
         """
@@ -499,6 +573,7 @@ class aclient(commands.Bot):
         ]
 
         # Use GPT-5 for image understanding while preserving context
+        gpt5_params = self.get_gpt5_params(channel_id)
         completion = await self.client.responses.create(
             model="gpt-5",
             instructions=self.starting_prompt,
@@ -506,7 +581,8 @@ class aclient(commands.Bot):
             temperature=self.temperature,
             max_output_tokens=10000,
             text={"format": {"type": "text"}},  # Explicitly request text output
-            reasoning={"effort": "medium"}
+            reasoning={"effort": gpt5_params["reasoning_effort"]},
+            parameters={"verbosity": gpt5_params["verbosity"]}
         )
 
         reply = getattr(completion, "output_text", None) or getattr(completion, "output", "")
@@ -613,6 +689,7 @@ class aclient(commands.Bot):
 
         # Initialize the chat models with the conversation history
         # Use higher token limit for GPT-5 to accommodate reasoning tokens
+        gpt5_params = self.get_gpt5_params(channel_id)
         stream = await self.client.responses.create(
             model=engine,
             instructions=self.starting_prompt,
@@ -620,7 +697,8 @@ class aclient(commands.Bot):
             temperature=self.temperature,
             max_output_tokens=10000,  # Increased from 4000 to allow for reasoning + output
             text={"format": {"type": "text"}},  # Explicitly request text output
-            reasoning={"effort": "medium"},  # Can be "minimal", "low", "medium", "high"
+            reasoning={"effort": gpt5_params["reasoning_effort"]},
+            parameters={"verbosity": gpt5_params["verbosity"]},
             stream=True
         )
 
@@ -747,6 +825,7 @@ class aclient(commands.Bot):
         """Generate image using DALL-E model"""
         try:
             # Use GPT-5 to refine/improve the prompt
+            gpt5_params = self.get_gpt5_params()  # Use global settings for draw function
             refine_response = await self.client.responses.create(
                 model="gpt-5",
                 instructions="You are a helpful image prompt engineer. Your task is to enhance the user's image prompt to create the best DALL-E image possible. Return only the enhanced prompt without any explanations or additional text.",
@@ -754,7 +833,8 @@ class aclient(commands.Bot):
                 temperature=self.temperature,
                 max_output_tokens=1000,  # Increased for GPT-5 reasoning
                 text={"format": {"type": "text"}},  # Explicitly request text output
-                reasoning={"effort": "low"}  # Simple task
+                reasoning={"effort": "low"},  # Simple task, always use low
+                parameters={"verbosity": "low"}  # Always use low verbosity for prompt enhancement
             )
             
             # Get the refined prompt
@@ -824,6 +904,11 @@ class aclient(commands.Bot):
                     if response and len(response) > 0:
                         await channel.send(response)
                     logger.info(f"System prompt response:{response}")
+
+                    # Clear the startup conversation from history so it doesn't pollute future conversations
+                    await self.conversation_manager.clear_context(channel_id)
+                    logger.info(f"Cleared startup greeting from conversation history for channel {channel_id}")
+
                     self.system_prompt_sent = True  # Mark as sent
                 else:
                     logger.info(
@@ -846,6 +931,7 @@ class aclient(commands.Bot):
         await self.__truncate_conversation(channel_id)
 
         # Get completion from OpenAI
+        gpt5_params = self.get_gpt5_params(channel_id)
         completion = await self.client.responses.create(
             model=self.openAI_gpt_engine,
             instructions=self.starting_prompt,
@@ -853,7 +939,8 @@ class aclient(commands.Bot):
             temperature=self.temperature,
             max_output_tokens=8000,  # Increased from 1000 to allow for reasoning + output
             text={"format": {"type": "text"}},  # Explicitly request text output
-            reasoning={"effort": "medium"}
+            reasoning={"effort": gpt5_params["reasoning_effort"]},
+            parameters={"verbosity": gpt5_params["verbosity"]}
         )
 
         response = getattr(completion, "output_text", None) or getattr(completion, "output", "")

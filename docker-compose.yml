@@ -8,3 +8,6 @@ services:
     env_file:
       - .env
     restart: unless-stopped
+    volumes:
+      - ./game_subscriptions.json:/DiscordBot/game_subscriptions.json
+      - ./gpt5_settings.json:/DiscordBot/gpt5_settings.json

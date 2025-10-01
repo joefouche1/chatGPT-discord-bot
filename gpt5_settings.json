@@ -1,0 +1,6 @@
+{
+  "global": {
+    "verbosity": "low",
+    "reasoning_effort": "low"
+  }
+}
