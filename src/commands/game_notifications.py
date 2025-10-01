@@ -7,7 +7,7 @@ import os
 import json
 import asyncio
 import aiohttp
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Set
 import discord
 from utils.log import logger
@@ -239,7 +239,7 @@ class GameNotificationManager:
 
     async def check_and_notify(self):
         """Check all subscriptions and send notifications for upcoming games"""
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
 
         for channel_id, subs in self.subscriptions.items():
             try:
@@ -265,11 +265,6 @@ class GameNotificationManager:
                     if game_info:
                         # Parse game time
                         game_time = datetime.fromisoformat(game_info['date'].replace('Z', '+00:00'))
-                        # Make timezone aware for comparison
-                        if game_time.tzinfo is None:
-                            game_time = game_time.replace(tzinfo=None)
-                        if now.tzinfo is None:
-                            now = now.replace(tzinfo=None)
 
                         time_until_game = (game_time - now).total_seconds() / 60  # minutes
 
