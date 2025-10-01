@@ -34,6 +34,8 @@ RUN apt-get update && apt-get install -y \
     poppler-utils \
     postgresql-client \
     python3-pil \
+    ffmpeg \
+    libopus0 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /DiscordBot

@@ -3,7 +3,7 @@ import re
 import random
 import asyncio
 import discord
-from discord import Embed
+from discord import Embed, app_commands
 import aiohttp
 import io
 from datetime import datetime, timedelta
@@ -22,6 +22,7 @@ from src.commands.actions import ACTION_CODES, process_action_code
 from src.commands.meme import Meme
 from src.commands.context import ContextCommands
 from src.commands.game_notifications import GameNotificationManager
+from src.voice.voice_manager import VoiceManager
 
 import sys
 import fcntl
@@ -35,6 +36,9 @@ client = aclient()
 
 # Initialize game notification manager
 game_notifier = GameNotificationManager(client)
+
+# Initialize voice manager
+voice_manager = VoiceManager(client, client.client)
 
 # Track processed message IDs to prevent duplicate processing
 # Store message IDs with timestamps to auto-cleanup old entries
@@ -326,6 +330,54 @@ def run_discord_bot():
             f"• Reasoning effort: `{current['reasoning_effort']}`"
         )
         logger.info(f"{interaction.user} updated GPT-5 settings in channel {channel_id}: {current}")
+
+    @client.tree.command(name="speak", description="Join voice channel and speak a response")
+    @app_commands.describe(
+        query="What should I talk about?"
+    )
+    async def speak(interaction: discord.Interaction, *, query: str):
+        """Join voice channel and speak a GPT-5 generated response"""
+        await interaction.response.defer(ephemeral=False)
+
+        # Check if user is in a voice channel
+        if not interaction.user.voice or not interaction.user.voice.channel:
+            await interaction.followup.send("❌ You need to be in a voice channel to use this command!")
+            return
+
+        voice_channel = interaction.user.voice.channel
+        guild_id = interaction.guild_id
+
+        try:
+            # Join the voice channel
+            await interaction.followup.send(f"🎤 Joining {voice_channel.name}...")
+            await voice_manager.join_channel(voice_channel)
+
+            # Generate response using GPT-5
+            await interaction.channel.send(f"💭 Thinking about: *{query}*...")
+            channel_id = str(interaction.channel_id)
+            response = await client.get_chat_response(query, channel_id)
+
+            # Speak the response
+            await interaction.channel.send(f"🗣️ Speaking response...")
+            await voice_manager.speak_text(guild_id, response)
+
+            # Show the text response as well
+            await interaction.channel.send(f"**Response:**\n{response}")
+
+            # Leave after speaking
+            await voice_manager.leave_channel(guild_id)
+            await interaction.channel.send("👋 Left voice channel")
+
+            logger.info(f"{interaction.user} used /speak in {voice_channel.name}: {query}")
+
+        except Exception as e:
+            logger.error(f"Error in /speak command: {e}")
+            await interaction.channel.send(f"❌ Error: {str(e)}")
+            # Try to leave voice channel on error
+            try:
+                await voice_manager.leave_channel(guild_id)
+            except:
+                pass
 
     @client.tree.command(name="info", description="Bot information")
     async def info(interaction: discord.Interaction):

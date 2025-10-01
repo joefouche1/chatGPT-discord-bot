@@ -11,3 +11,4 @@ services:
     volumes:
       - ./game_subscriptions.json:/DiscordBot/game_subscriptions.json
       - ./gpt5_settings.json:/DiscordBot/gpt5_settings.json
+      - ./audio_cache:/DiscordBot/audio_cache
