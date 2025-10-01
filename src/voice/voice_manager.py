@@ -9,6 +9,7 @@ import discord
 from pathlib import Path
 from utils.log import logger
 from openai import AsyncOpenAI
+from src.voice.audio_sink import VoiceListener
 
 
 class VoiceManager:
@@ -20,6 +21,7 @@ class VoiceManager:
         self.voice_clients = {}  # guild_id -> voice_client
         self.audio_cache_dir = Path("audio_cache")
         self.audio_cache_dir.mkdir(exist_ok=True)
+        self.listener = VoiceListener(openai_client)
 
     async def join_channel(self, voice_channel: discord.VoiceChannel) -> discord.VoiceClient:
         """Join a voice channel"""
@@ -144,6 +146,55 @@ class VoiceManager:
         except Exception as e:
             logger.error(f"Failed to play audio: {e}")
             raise
+
+    async def listen_and_respond(self, guild_id: int, response_generator, timeout: int = 30) -> tuple[str, str]:
+        """
+        Listen for speech in voice channel and generate a response
+
+        Args:
+            guild_id: Guild ID where to listen
+            response_generator: Async function that takes (question) and returns answer
+            timeout: Seconds to listen for speech
+
+        Returns:
+            Tuple of (question, answer) or (None, None) if no speech detected
+        """
+        if guild_id not in self.voice_clients:
+            raise ValueError(f"Not connected to voice in guild {guild_id}")
+
+        vc = self.voice_clients[guild_id]
+        if not vc.is_connected():
+            raise ValueError(f"Voice client not connected in guild {guild_id}")
+
+        # Listen for speech
+        logger.info(f"Listening for speech in guild {guild_id}...")
+        question, user_id = await self.listener.listen_for_speech(vc, timeout)
+
+        if not question:
+            logger.warning("No speech detected")
+            return None, None
+
+        logger.info(f"Heard from user {user_id}: {question}")
+
+        # Check for wake words
+        if not self.listener.contains_wake_word(question):
+            logger.info("No wake words detected, ignoring speech")
+            return None, None
+
+        # Generate response
+        logger.info("Generating response...")
+        answer = await response_generator(question)
+
+        if not answer:
+            logger.error("Failed to generate response")
+            return question, None
+
+        logger.info(f"Response: {answer[:100]}...")
+
+        # Speak the response
+        await self.speak_text(guild_id, answer)
+
+        return question, answer
 
     async def cleanup(self):
         """Disconnect from all voice channels"""

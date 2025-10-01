@@ -379,6 +379,65 @@ def run_discord_bot():
             except:
                 pass
 
+    @client.tree.command(name="listen", description="Listen for questions starting with 'pig' or 'hog'")
+    async def listen(interaction: discord.Interaction):
+        """Join voice channel, listen for a question addressed to 'pig' or 'hog', and answer it"""
+        await interaction.response.defer(ephemeral=False)
+
+        # Check if user is in a voice channel
+        if not interaction.user.voice or not interaction.user.voice.channel:
+            await interaction.followup.send("❌ You need to be in a voice channel to use this command!")
+            return
+
+        voice_channel = interaction.user.voice.channel
+        guild_id = interaction.guild_id
+        channel_id = str(interaction.channel_id)
+
+        try:
+            # Join the voice channel
+            await interaction.followup.send(f"🎤 Joining {voice_channel.name}...")
+            await voice_manager.join_channel(voice_channel)
+
+            # Listen for speech
+            await interaction.channel.send("👂 Listening for your question... (30 seconds)\n💡 *Start with 'pig' or 'hog' (e.g., 'Pig, what is niobium?')*")
+
+            # Create response generator function
+            async def generate_response(question: str) -> str:
+                return await client.get_chat_response(question, channel_id)
+
+            # Listen and respond
+            question, answer = await voice_manager.listen_and_respond(
+                guild_id,
+                generate_response,
+                timeout=30
+            )
+
+            if not question:
+                await interaction.channel.send("❌ No question detected with 'pig' or 'hog'. Please address me by name!")
+            elif not answer:
+                await interaction.channel.send(f"❓ **Heard:** {question}\n\n❌ Failed to generate response")
+            else:
+                # Show the conversation
+                await interaction.channel.send(
+                    f"❓ **Question:** {question}\n\n"
+                    f"💬 **Answer:** {answer}"
+                )
+
+            # Leave after responding
+            await voice_manager.leave_channel(guild_id)
+            await interaction.channel.send("👋 Left voice channel")
+
+            logger.info(f"{interaction.user} used /listen in {voice_channel.name}")
+
+        except Exception as e:
+            logger.error(f"Error in /listen command: {e}")
+            await interaction.channel.send(f"❌ Error: {str(e)}")
+            # Try to leave voice channel on error
+            try:
+                await voice_manager.leave_channel(guild_id)
+            except:
+                pass
+
     @client.tree.command(name="info", description="Bot information")
     async def info(interaction: discord.Interaction):
         """Command to show bot information."""
