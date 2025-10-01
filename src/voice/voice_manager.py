@@ -120,8 +120,19 @@ class VoiceManager:
 
         # Play audio
         try:
-            audio_source = discord.FFmpegPCMAudio(str(audio_file))
-            vc.play(audio_source)
+            # FFmpeg options to convert audio for Discord voice
+            # Discord expects: 48kHz sample rate, 2 channels, 16-bit PCM
+            ffmpeg_options = {
+                'options': '-vn -ar 48000 -ac 2 -b:a 128k'
+            }
+            audio_source = discord.FFmpegPCMAudio(str(audio_file), **ffmpeg_options)
+
+            # Play with error callback
+            def after_callback(error):
+                if error:
+                    logger.error(f"Playback error: {error}")
+
+            vc.play(audio_source, after=after_callback)
             logger.info(f"Playing audio in guild {guild_id}")
 
             # Wait for playback to finish
