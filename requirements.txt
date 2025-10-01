@@ -38,6 +38,8 @@ certifi==2025.8.3
     #   httpcore
     #   httpx
     #   requests
+cffi==2.0.0
+    # via pynacl
 charset-normalizer==3.4.3
     # via
     #   -r requirements.in
@@ -83,10 +85,14 @@ propcache==0.3.2
     #   -r requirements.in
     #   aiohttp
     #   yarl
+pycparser==2.23
+    # via cffi
 pydantic==2.11.7
     # via openai
 pydantic-core==2.33.2
     # via pydantic
+pynacl==1.6.0
+    # via -r requirements.in
 python-dotenv==1.1.1
     # via -r requirements.in
 regex==2025.7.34
