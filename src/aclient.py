@@ -59,6 +59,7 @@ class aclient(commands.Bot):
         """
         intents = discord.Intents.default()
         intents.message_content = True
+        intents.voice_states = True  # Required for voice connections
         #intents.members = True
         super().__init__(command_prefix="!", intents=intents, **kwargs)
         
