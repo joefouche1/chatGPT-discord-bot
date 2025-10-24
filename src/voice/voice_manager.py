@@ -9,7 +9,10 @@ import discord
 from pathlib import Path
 from utils.log import logger
 from openai import AsyncOpenAI
-from src.voice.audio_sink import VoiceListener
+
+# Voice listening disabled - requires py-cord instead of discord.py
+# from src.voice.audio_sink import VoiceListener
+VoiceListener = None
 
 
 class VoiceManager:
@@ -21,7 +24,7 @@ class VoiceManager:
         self.voice_clients = {}  # guild_id -> voice_client
         self.audio_cache_dir = Path("audio_cache")
         self.audio_cache_dir.mkdir(exist_ok=True)
-        self.listener = VoiceListener(openai_client)
+        self.listener = VoiceListener(openai_client) if VoiceListener else None
 
     async def join_channel(self, voice_channel: discord.VoiceChannel) -> discord.VoiceClient:
         """Join a voice channel"""
@@ -151,6 +154,8 @@ class VoiceManager:
         """
         Listen for speech in voice channel and generate a response
 
+        Note: Voice listening is currently disabled. Requires py-cord instead of discord.py.
+
         Args:
             guild_id: Guild ID where to listen
             response_generator: Async function that takes (question) and returns answer
@@ -159,6 +164,10 @@ class VoiceManager:
         Returns:
             Tuple of (question, answer) or (None, None) if no speech detected
         """
+        if not self.listener:
+            logger.error("Voice listening is disabled - requires py-cord")
+            raise NotImplementedError("Voice listening requires py-cord library")
+
         if guild_id not in self.voice_clients:
             raise ValueError(f"Not connected to voice in guild {guild_id}")
 

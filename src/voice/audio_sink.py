@@ -5,32 +5,33 @@ Audio Sink for recording voice from Discord
 import discord
 import asyncio
 import io
+import wave
 from pathlib import Path
 from utils.log import logger
 
 
-class AudioSink(discord.sinks.Sink):
-    """Custom audio sink that records user audio"""
+class AudioBuffer:
+    """Buffer for collecting audio data from a user"""
 
-    def __init__(self):
-        super().__init__()
-        self.audio_data = {}  # user_id -> audio bytes
-        self.recording = True
+    def __init__(self, user_id):
+        self.user_id = user_id
+        self.buffer = bytearray()
 
-    def write(self, data, user):
-        """Called when audio data is received from a user"""
-        if user and self.recording:
-            if user not in self.audio_data:
-                self.audio_data[user] = bytearray()
-            self.audio_data[user].extend(data.file.read())
+    def write(self, data):
+        """Add audio data to buffer"""
+        self.buffer.extend(data)
 
-    def cleanup(self):
-        """Called when recording stops"""
-        self.recording = False
+    def get_bytes(self):
+        """Get buffered audio as bytes"""
+        return bytes(self.buffer)
 
-    def get_audio(self, user):
-        """Get recorded audio for a specific user"""
-        return bytes(self.audio_data.get(user, bytearray()))
+    def save_to_wav(self, filepath: Path, sample_rate=48000, channels=2):
+        """Save buffer to WAV file"""
+        with wave.open(str(filepath), 'wb') as wav_file:
+            wav_file.setnchannels(channels)
+            wav_file.setsampwidth(2)  # 16-bit
+            wav_file.setframerate(sample_rate)
+            wav_file.writeframes(self.buffer)
 
 
 class VoiceListener:
@@ -45,6 +46,10 @@ class VoiceListener:
         """
         Listen for speech in voice channel and return transcription
 
+        Note: Official discord.py does not support voice recording.
+        This is a placeholder that returns None.
+        To enable voice recording, switch to py-cord instead of discord.py.
+
         Args:
             voice_client: Connected voice client
             timeout: Maximum seconds to listen
@@ -52,53 +57,13 @@ class VoiceListener:
         Returns:
             Tuple of (transcribed_text, user_id) or (None, None) if timeout
         """
-        logger.info(f"Starting to listen for speech (timeout: {timeout}s)")
+        logger.warning("Voice recording is not supported in official discord.py")
+        logger.warning("To enable recording, install py-cord: pip install py-cord")
+        logger.info(f"Would listen for speech (timeout: {timeout}s) if py-cord was installed")
 
-        # Create audio sink
-        sink = AudioSink()
-
-        # Start recording
-        voice_client.start_recording(
-            sink,
-            lambda *args: logger.info("Recording stopped"),
-            lambda *args: logger.error(f"Recording error: {args}")
-        )
-
-        # Wait for timeout or audio
-        await asyncio.sleep(timeout)
-
-        # Stop recording
-        voice_client.stop_recording()
-        logger.info("Stopped recording")
-
-        # Find user with most audio data
-        if not sink.audio_data:
-            logger.warning("No audio data recorded")
-            return None, None
-
-        # Get user who spoke the most
-        user_id = max(sink.audio_data.keys(), key=lambda u: len(sink.audio_data[u]))
-        audio_bytes = sink.get_audio(user_id)
-
-        if len(audio_bytes) < 1000:  # Minimum audio threshold
-            logger.warning("Audio data too short")
-            return None, None
-
-        logger.info(f"Recorded {len(audio_bytes)} bytes from user {user_id}")
-
-        # Save to file for Whisper API
-        audio_file = self.audio_cache_dir / f"recording_{user_id}.wav"
-        with open(audio_file, 'wb') as f:
-            f.write(audio_bytes)
-
-        # Transcribe with Whisper
-        try:
-            transcription = await self.transcribe_audio(audio_file)
-            logger.info(f"Transcribed: {transcription}")
-            return transcription, user_id
-        except Exception as e:
-            logger.error(f"Transcription failed: {e}")
-            return None, None
+        # Official discord.py doesn't support voice recording
+        # You need to use py-cord (discord.py fork) for this functionality
+        return None, None
 
     async def transcribe_audio(self, audio_file: Path) -> str:
         """
