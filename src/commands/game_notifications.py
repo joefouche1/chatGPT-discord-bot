@@ -20,7 +20,7 @@ class GameNotificationManager:
         self.client = bot_client
         self.config_file = config_file
         self.subscriptions: Dict[str, List[Dict]] = {}  # channel_id -> list of team subscriptions
-        self.notified_games: Set[str] = set()  # Track games we've already notified about
+        self.notified_games: Dict[str, datetime] = {}  # game_id -> timestamp when notified
         self.check_interval = 900  # Check every 15 minutes
         self.notification_window = 30  # Notify when game starts within 30 minutes
         self.load_subscriptions()
@@ -108,6 +108,24 @@ class GameNotificationManager:
     def get_all_subscriptions(self) -> Dict[str, List[Dict]]:
         """Get all subscriptions"""
         return self.subscriptions
+
+    def cleanup_old_notifications(self):
+        """Remove game IDs older than 24 hours from the notified set"""
+        now = datetime.now(timezone.utc)
+        cutoff = now - timedelta(hours=24)
+
+        # Find all game IDs to remove
+        to_remove = [
+            game_id for game_id, notified_time in self.notified_games.items()
+            if notified_time < cutoff
+        ]
+
+        # Remove them
+        for game_id in to_remove:
+            del self.notified_games[game_id]
+
+        if to_remove:
+            logger.info(f"Cleaned up {len(to_remove)} old game notifications")
 
     async def check_game_schedule(self, team_name: str, league: str, date: datetime) -> Optional[Dict]:
         """
@@ -241,6 +259,9 @@ class GameNotificationManager:
         """Check all subscriptions and send notifications for upcoming games"""
         now = datetime.now(timezone.utc)
 
+        # Clean up old notifications at the start of each check
+        self.cleanup_old_notifications()
+
         for channel_id, subs in self.subscriptions.items():
             try:
                 # Get the Discord channel
@@ -263,13 +284,19 @@ class GameNotificationManager:
                         game_info = await self.check_game_schedule(team, league, tomorrow)
 
                     if game_info:
+                        # Validate event_id exists
+                        event_id = game_info.get('event_id')
+                        if not event_id:
+                            logger.warning(f"Game found for {team} but missing event_id, skipping notification")
+                            continue
+
                         # Parse game time
                         game_time = datetime.fromisoformat(game_info['date'].replace('Z', '+00:00'))
 
                         time_until_game = (game_time - now).total_seconds() / 60  # minutes
 
                         # Create unique game ID to track notifications
-                        game_id = f"{channel_id}_{game_info['event_id']}"
+                        game_id = f"{channel_id}_{event_id}"
 
                         # Check if we should notify
                         if 0 <= time_until_game <= lead_time and game_id not in self.notified_games:
@@ -280,12 +307,9 @@ class GameNotificationManager:
                                     f"@here 🚨 **{team}** game starting in {int(time_until_game)} minutes!",
                                     embed=embed
                                 )
-                                self.notified_games.add(game_id)
+                                # Store game_id with current timestamp
+                                self.notified_games[game_id] = now
                                 logger.info(f"Sent game notification for {team} to channel {channel_id}")
-
-                        # Clean up old notified games (remove games older than 12 hours)
-                        if time_until_game < -720:  # Game was more than 12 hours ago
-                            self.notified_games.discard(game_id)
 
             except Exception as e:
                 logger.error(f"Error checking notifications for channel {channel_id}: {e}")
