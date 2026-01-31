@@ -385,3 +385,63 @@ class EnhancedConversationManager:
                 "last_activity": context.metadata.last_activity.isoformat()
             })
         return info
+    
+    async def get_context_with_memory(
+        self,
+        channel_id: str,
+        current_message: str,
+        memory_storage=None,
+        history_limit: int = 10
+    ) -> str:
+        """
+        Phase 3: Get conversation history augmented with relevant memories.
+        
+        Args:
+            channel_id: Channel ID
+            current_message: Current user message to search memories with
+            memory_storage: HybridMemoryStorage instance (optional)
+            history_limit: Number of recent messages to include
+        
+        Returns:
+            Formatted context string with memories + recent conversation
+        """
+        # Get conversation history
+        conversation_history = await self.get_history(channel_id)
+        
+        # If memory storage is available and enabled, use it to augment context
+        if memory_storage and hasattr(memory_storage, 'get_context_with_memory'):
+            return await memory_storage.get_context_with_memory(
+                channel_id=channel_id,
+                current_message=current_message,
+                conversation_history=conversation_history,
+                history_limit=history_limit
+            )
+        
+        # Fallback: return conversation history only
+        context_parts = ["## Recent Conversation\n"]
+        
+        recent_messages = conversation_history[-history_limit:] if len(conversation_history) > history_limit else conversation_history
+        
+        for msg in recent_messages:
+            role = msg.get("role")
+            content = msg.get("content")
+            
+            if isinstance(content, str):
+                if role == "user":
+                    context_parts.append(f"User: {content}")
+                elif role == "assistant":
+                    context_parts.append(f"Assistant: {content}")
+            elif isinstance(content, list):
+                # Handle multimodal content
+                text_parts = []
+                for part in content:
+                    if part.get("type") == "text":
+                        text_parts.append(part.get("text", ""))
+                if text_parts:
+                    combined_text = " ".join(text_parts)
+                    if role == "user":
+                        context_parts.append(f"User: {combined_text}")
+                    elif role == "assistant":
+                        context_parts.append(f"Assistant: {combined_text}")
+        
+        return "\n".join(context_parts)

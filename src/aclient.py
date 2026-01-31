@@ -725,6 +725,7 @@ class aclient(commands.Bot):
         """
         Adds the user's message to the conversation history and initializes
         the chat models with the conversation history.
+        Phase 3: Now includes memory recall in context.
         """
         engine = self.openAI_gpt_engine
         
@@ -741,8 +742,20 @@ class aclient(commands.Bot):
 
         await self.__truncate_conversation(channel_id)
 
-        formatted_input = await self._format_history_for_responses(channel_id)
-        logger.info(f"Sending to API - Input length: {len(formatted_input)}")
+        # Phase 3: Use memory-augmented context if memory extraction is enabled
+        if self.memory_extraction_enabled and self.memory_storage:
+            formatted_input = await self.conversation_manager.get_context_with_memory(
+                channel_id=channel_id,
+                current_message=message or "",
+                memory_storage=self.memory_storage,
+                history_limit=10
+            )
+            logger.info(f"Sending to API with memory-augmented context - Input length: {len(formatted_input)}")
+        else:
+            # Fallback to original formatting without memories
+            formatted_input = await self._format_history_for_responses(channel_id)
+            logger.info(f"Sending to API - Input length: {len(formatted_input)}")
+        
         logger.info(f"Input preview: {formatted_input[:200]}...")
 
         # Initialize the chat models with the conversation history

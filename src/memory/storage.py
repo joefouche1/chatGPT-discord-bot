@@ -534,3 +534,76 @@ class HybridMemoryStorage:
         
         async with aiofiles.open(profiles_file, 'a') as f:
             await f.write(profile_text)
+    
+    async def get_context_with_memory(
+        self,
+        channel_id: str,
+        current_message: str,
+        conversation_history: List[Dict[str, Any]],
+        history_limit: int = 10
+    ) -> str:
+        """
+        Phase 3: Get conversation context augmented with relevant memories.
+        
+        Args:
+            channel_id: Channel ID to filter memories
+            current_message: Current user message to search memories with
+            conversation_history: Recent conversation history
+            history_limit: Number of recent messages to include
+        
+        Returns:
+            Formatted context string with memories + recent conversation
+        """
+        context_parts = []
+        
+        # Search for relevant memories using current message as query
+        try:
+            relevant_memories = await self.search_memories(
+                query=current_message,
+                top_k=5,
+                channel_id=channel_id,
+                min_confidence=MemoryConfidence.MEDIUM
+            )
+            
+            if relevant_memories:
+                context_parts.append("## Relevant Memories\n")
+                for result in relevant_memories:
+                    memory = result.memory
+                    date_str = memory.timestamp.strftime("%Y-%m-%d")
+                    # Format: - [memory content] (from [date])
+                    context_parts.append(f"- {memory.content} (from {date_str})")
+                context_parts.append("\n")
+        except Exception as e:
+            # Log error but continue with conversation history
+            import logging
+            logging.error(f"Error searching memories: {e}", exc_info=True)
+        
+        # Add recent conversation history
+        context_parts.append("## Recent Conversation\n")
+        
+        # Take last N messages
+        recent_messages = conversation_history[-history_limit:] if len(conversation_history) > history_limit else conversation_history
+        
+        for msg in recent_messages:
+            role = msg.get("role")
+            content = msg.get("content")
+            
+            if isinstance(content, str):
+                if role == "user":
+                    context_parts.append(f"User: {content}")
+                elif role == "assistant":
+                    context_parts.append(f"Assistant: {content}")
+            elif isinstance(content, list):
+                # Handle multimodal content
+                text_parts = []
+                for part in content:
+                    if part.get("type") == "text":
+                        text_parts.append(part.get("text", ""))
+                if text_parts:
+                    combined_text = " ".join(text_parts)
+                    if role == "user":
+                        context_parts.append(f"User: {combined_text}")
+                    elif role == "assistant":
+                        context_parts.append(f"Assistant: {combined_text}")
+        
+        return "\n".join(context_parts)
