@@ -13,6 +13,7 @@ from utils.log import logger
 
 from utils.message_utils import send_split_message
 from src.conversation_manager import EnhancedConversationManager, JSONMemoryStorage
+from src.memory import HybridMemoryStorage, MemoryExtractor, extract_and_store_memory
 
 from dotenv import load_dotenv
 
@@ -71,6 +72,23 @@ class aclient(commands.Bot):
             max_inactive_hours=168  # 7 days
         )
 
+        # Initialize Phase 2 persistent memory system
+        enable_memory_extraction = os.getenv("ENABLE_MEMORY_EXTRACTION", "true").lower() == "true"
+        self.memory_extraction_enabled = enable_memory_extraction
+        
+        if enable_memory_extraction:
+            try:
+                # Initialize HybridMemoryStorage (will auto-detect OpenAI or sentence-transformers)
+                self.memory_storage = HybridMemoryStorage(base_path="memory")
+                logger.info("Initialized HybridMemoryStorage for persistent memory")
+            except Exception as e:
+                logger.warning(f"Failed to initialize HybridMemoryStorage, disabling memory extraction: {e}")
+                self.memory_extraction_enabled = False
+                self.memory_storage = None
+        else:
+            logger.info("Memory extraction disabled via ENABLE_MEMORY_EXTRACTION env var")
+            self.memory_storage = None
+
         # Use the built-in command tree from commands.Bot (already initialized by super().__init__)
         self.current_channel = None
         self.activity = discord.Activity(
@@ -83,6 +101,13 @@ class aclient(commands.Bot):
         self.openAI_gpt_engine = os.getenv("GPT_ENGINE", "gpt-5")
         self.temperature = 1.0 # expected by gpt5
         self.client = AsyncOpenAI()
+
+        # Initialize memory extractor (Phase 2)
+        if self.memory_extraction_enabled:
+            self.memory_extractor = MemoryExtractor(self.client)
+            logger.info("Initialized MemoryExtractor for automatic memory capture")
+        else:
+            self.memory_extractor = None
 
         config_dir = os.path.abspath(f"{__file__}/../../")
         prompt_name = 'system_prompt.txt'
@@ -532,6 +557,39 @@ class aclient(commands.Bot):
                 
         except Exception as e:
             logger.error(f"Error processing action code in model response: {e}")
+
+        # Phase 2: Extract and store memory after response completes
+        if self.memory_extraction_enabled and user_message and response:
+            try:
+                # Get Discord metadata for richer context
+                username = None
+                user_id = None
+                channel_name = None
+                guild_name = None
+                
+                if discord_message:
+                    user_id = str(discord_message.author.id)
+                    username = str(discord_message.author.name)
+                    channel_name = discord_message.channel.name if hasattr(discord_message.channel, 'name') else None
+                    guild_name = discord_message.guild.name if discord_message.guild else None
+                
+                # Extract and store memory asynchronously (don't block response)
+                asyncio.create_task(
+                    extract_and_store_memory(
+                        extractor=self.memory_extractor,
+                        storage=self.memory_storage,
+                        user_message=user_message,
+                        assistant_message=response,
+                        channel_id=channel_id,
+                        user_id=user_id,
+                        username=username,
+                        channel_name=channel_name,
+                        guild_name=guild_name
+                    )
+                )
+                logger.debug(f"Triggered memory extraction for channel {channel_id}")
+            except Exception as e:
+                logger.error(f"Error triggering memory extraction: {e}", exc_info=True)
 
         return response
 

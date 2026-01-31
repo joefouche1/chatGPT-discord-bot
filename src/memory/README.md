@@ -1,6 +1,6 @@
-# Persistent Memory System - Phase 1
+# Persistent Memory System - Phases 1 & 2
 
-This module implements a hybrid memory storage system for the Discord bot, combining daily markdown logs, long-term curated memory, and semantic search capabilities.
+This module implements a hybrid memory storage system for the Discord bot, combining daily markdown logs, long-term curated memory, semantic search capabilities, and **automatic memory extraction from conversations** (Phase 2).
 
 ## Architecture
 
@@ -202,12 +202,126 @@ Main storage class:
 - `save_user_profile(profile)` - Save user profile
 - `save_channel_profile(profile)` - Save channel profile
 
+## Phase 2: Automatic Memory Extraction
+
+Phase 2 adds automatic extraction of memorable information from conversations using LLM analysis.
+
+### Usage
+
+```python
+from memory import MemoryExtractor, extract_and_store_memory
+
+# Initialize extractor with OpenAI client
+extractor = MemoryExtractor(openai_client)
+
+# Extract memory from conversation
+memory = await extractor.extract_memory(
+    user_message="I live in Pittsburgh and work as a software engineer",
+    assistant_message="Great! Pittsburgh has a vibrant tech scene...",
+    channel_id="123456",
+    user_id="789012",
+    username="john_doe"
+)
+
+# If memory is HIGH confidence, it will be returned
+if memory:
+    print(f"Extracted {memory.memory_type}: {memory.content}")
+```
+
+### Helper Function
+
+The `extract_and_store_memory` function combines extraction and storage:
+
+```python
+# Extract and store in one call
+await extract_and_store_memory(
+    extractor=memory_extractor,
+    storage=memory_storage,
+    user_message="I'm flying to Vegas on Feb 5th",
+    assistant_message="Have a great trip!",
+    channel_id="123456",
+    user_id="789012",
+    username="john_doe",
+    channel_name="travel-plans",
+    guild_name="My Server"
+)
+```
+
+### Integration with Discord Bot
+
+The bot automatically captures memories after each response:
+
+```python
+# In aclient.py handle_response():
+if self.memory_extraction_enabled and user_message and response:
+    asyncio.create_task(
+        extract_and_store_memory(
+            extractor=self.memory_extractor,
+            storage=self.memory_storage,
+            user_message=user_message,
+            assistant_message=response,
+            channel_id=channel_id,
+            user_id=user_id,
+            username=username,
+            channel_name=channel_name,
+            guild_name=guild_name
+        )
+    )
+```
+
+### Environment Variables
+
+Control memory extraction:
+
+```bash
+# Enable/disable memory extraction (default: true)
+ENABLE_MEMORY_EXTRACTION=true
+```
+
+### What Gets Extracted
+
+The extractor identifies and captures:
+
+- **Facts**: Personal information (location, job, interests, technical details)
+- **Preferences**: Communication style, likes/dislikes, response preferences
+- **Decisions**: Important choices, plans, commitments
+- **Events**: Scheduled activities, deadlines, travel plans
+
+**Only HIGH confidence extractions** are saved to avoid noise.
+
+### Example Extractions
+
+```
+User: "I live in Pittsburgh and work as a software engineer"
+→ TYPE: fact
+→ CONTENT: User lives in Pittsburgh, works as software engineer
+→ CONFIDENCE: high
+
+User: "I prefer concise answers without too much explanation"
+→ TYPE: preference
+→ CONTENT: Prefers concise, brief responses without extensive explanations
+→ CONFIDENCE: high
+
+User: "I'm flying to Vegas on Feb 5th for a conference"
+→ TYPE: event
+→ CONTENT: Flying to Vegas on Feb 5th for a conference
+→ CONFIDENCE: high
+```
+
+### How It Works
+
+1. After each bot response, the conversation is analyzed
+2. LLM extracts memorable information using structured prompt
+3. Response is parsed into TYPE, CONTENT, CONFIDENCE
+4. Only HIGH confidence memories are saved
+5. Memory is added to daily log and long-term storage
+6. Vector embedding is created for semantic search
+
 ## Next Phases
 
-Phase 1 provides the foundation. Future phases will add:
+Phase 1 & 2 provide the foundation and automatic capture. Future phases will add:
 
-- **Phase 2**: Automatic memory extraction from conversations
-- **Phase 3**: Memory recall and context injection
+- **Phase 3**: Memory recall and context injection into conversations
 - **Phase 4**: Discord slash commands (`/remember`, `/recall`)
 - **Phase 5**: Periodic consolidation and cleanup
 
