@@ -21,3 +21,5 @@ urllib3
 certifi
 url-normalize
 Pillow
+aiosqlite
+aiofiles
